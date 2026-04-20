@@ -47,18 +47,32 @@ export function parseCaptionTracks(pr: PlayerResponse): CaptionTrack[] {
   })
 }
 
-export function extractVideoInfo(html: string) {
-  const pr = extractPlayerResponse(html)
-  if (!pr) return null
+function playerResponseToInfo(pr: PlayerResponse) {
   const vd = pr.videoDetails ?? {}
-  const tracks = parseCaptionTracks(pr)
   return {
     videoId: vd.videoId ?? '',
     title: vd.title ?? '',
     channel: vd.author ?? '',
     durationSec: Number(vd.lengthSeconds ?? 0),
-    tracks,
+    tracks: parseCaptionTracks(pr),
   }
+}
+
+export function extractVideoInfo(html: string) {
+  const pr = extractPlayerResponse(html)
+  if (!pr) return null
+  return playerResponseToInfo(pr)
+}
+
+export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
+  const html = await fetchWatchPage(videoId, signal)
+  const pr = extractPlayerResponse(html)
+  if (pr?.videoDetails?.videoId) return playerResponseToInfo(pr)
+  // watch page blocked or parse failed — try InnerTube Android endpoint
+  console.log(JSON.stringify({ phase: 'youtube.innertube.fallback', videoId }))
+  const pr2 = await fetchPlayerResponseViaInnertube(videoId, signal)
+  if (!pr2?.videoDetails?.videoId) throw new YoutubeError('VIDEO_NOT_FOUND')
+  return playerResponseToInfo(pr2)
 }
 
 const TEXT_RE = /<text[^>]*>([\s\S]*?)<\/text>/g
@@ -124,6 +138,33 @@ export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Pro
   console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
   return await res.text()
+}
+
+export async function fetchPlayerResponseViaInnertube(videoId: string, signal?: AbortSignal): Promise<PlayerResponse | null> {
+  const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'user-agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip',
+      'x-youtube-client-name': '3',
+      'x-youtube-client-version': '19.09.37',
+    },
+    body: JSON.stringify({
+      videoId,
+      context: {
+        client: {
+          clientName: 'ANDROID',
+          clientVersion: '19.09.37',
+          hl: 'en',
+          gl: 'US',
+          androidSdkVersion: 34,
+        },
+      },
+    }),
+    signal,
+  })
+  if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
+  return await res.json() as PlayerResponse
 }
 
 export async function fetchTimedText(baseUrl: string, signal?: AbortSignal): Promise<string> {

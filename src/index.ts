@@ -1,4 +1,4 @@
-import { parseVideoId, fetchWatchPage, fetchTimedText, extractVideoInfo, timedTextToTranscript, YoutubeError } from './youtube'
+import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
 import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from './gemini'
 import { buildPrompt, PROMPT_VERSION } from './prompt'
 import { createNdjsonParser } from './parser'
@@ -35,10 +35,9 @@ async function inspect(request: Request, env: Env): Promise<Response> {
 
   log({ reqId, route: '/api/inspect', phase: 'start', videoId })
   try {
-    const html = await fetchWatchPage(videoId, request.signal)
-    log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started, bytes: html.length })
-    const info = extractVideoInfo(html)
-    if (!info || !info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
+    const info = await fetchVideoInfo(videoId, request.signal)
+    log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started })
+    if (!info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
 
     const tracks = await Promise.all(info.tracks.map(async t => {
@@ -86,9 +85,8 @@ async function generate(request: Request, env: Env): Promise<Response> {
 
   let title: string, channel: string, durationSec: number, transcript: string
   try {
-    const html = await fetchWatchPage(videoId, request.signal)
-    const info = extractVideoInfo(html)
-    if (!info) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
+    const info = await fetchVideoInfo(videoId, request.signal)
+    if (!info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
     const track = info.tracks.find(t => t.id === body.trackId)
     if (!track) return json(404, { reqId, error: 'NO_CAPTIONS' })
