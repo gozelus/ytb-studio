@@ -74,6 +74,7 @@ $('go').addEventListener('click', () => start())
 $('url').addEventListener('keydown', (e) => { if (e.key === 'Enter') start() })
 
 async function start() {
+  state.cancelled = false
   const url = $('url').value
   const hintErr = $('hintErr')
   if (!validateUrl(url)) { hintErr.textContent = '这不像是 YouTube 链接'; return }
@@ -330,7 +331,7 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null; state.tracks = null; state.meta = null
-  state.articleEnded = false; state.cancelled = false
+  state.articleEnded = false
   state.aborter = null
   $('hintErr').textContent = ''
   $('articleBody').innerHTML = ''
@@ -403,24 +404,26 @@ function estimateProgress() {
 
 // ---------- Error action handlers ----------
 function backToHero() {
+  // Set cancelled before abort() so any async catch in-flight sees it immediately
+  state.cancelled = true
   if (state.aborter) state.aborter.abort()
   $('rail').classList.remove('in')
   $('topbar').classList.remove('in')
   hideAllViews()
   $('hero').classList.remove('out')
   $('url').disabled = false; $('go').disabled = false
-  resetRun()
-  // Set cancelled AFTER resetRun so late-arriving AbortError in consumeSse is still silenced
-  state.cancelled = true
+  resetRun()  // does NOT touch cancelled — flag stays true until next start()/retry()/regenerate()
 }
 
 function retry() {
+  state.cancelled = false
   resetRun()
   $('rail').classList.add('dimmed')
   runInspect($('url').value).catch(showInlineError)
 }
 
 function regenerate() {
+  state.cancelled = false
   resetRun()
   $('articleView').classList.add('out')
   $('articleView').classList.remove('show')
