@@ -61,6 +61,65 @@ export function extractVideoInfo(html: string) {
   }
 }
 
+const TEXT_RE = /<text[^>]*>([\s\S]*?)<\/text>/g
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+export function timedTextToTranscript(xml: string): string {
+  if (!xml.includes('<text')) return ''
+  const lines: string[] = []
+  for (const m of xml.matchAll(TEXT_RE)) {
+    const raw = m[1] ?? ''
+    const text = decodeEntities(raw).trim().replace(/\s+/g, ' ')
+    if (text) lines.push(text)
+  }
+  const merged: string[] = []
+  let cur = ''
+  for (const line of lines) {
+    cur = cur ? `${cur} ${line}` : line
+    if (/[.!?;。！？]$/.test(line)) {
+      merged.push(cur)
+      cur = ''
+    }
+  }
+  if (cur) merged.push(cur)
+  return merged.join('\n')
+}
+
+export class YoutubeError extends Error {
+  constructor(public code: 'INVALID_URL' | 'VIDEO_NOT_FOUND' | 'NO_CAPTIONS' | 'YOUTUBE_BLOCKED') {
+    super(code)
+  }
+}
+
+export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'accept-language': 'en-US,en;q=0.9',
+      'cookie': 'CONSENT=YES+1',
+    },
+    signal,
+  })
+  if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
+  return await res.text()
+}
+
+export async function fetchTimedText(baseUrl: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(baseUrl, { signal })
+  if (!res.ok) throw new YoutubeError('YOUTUBE_BLOCKED')
+  return await res.text()
+}
+
 export function parseVideoId(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null
   let u: URL
