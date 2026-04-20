@@ -12,7 +12,6 @@
 const state = {
   mode: 'rewrite',
   reqId: null,
-  isFallback: false,   // true when inspect couldn't reach YouTube metadata
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
   articleEnded: false,
@@ -117,7 +116,6 @@ async function runInspect(url) {
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
-  state.isFallback = data.fallback ?? false
   renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
 
@@ -134,31 +132,18 @@ async function runInspect(url) {
 function showPicker(data) {
   showView('pickView')
   setStatus('等待选择字幕')
-  if (data.fallback || !data.title) {
-    $('pickTitle').textContent = '视频信息暂不可用'
-    $('pickMeta').textContent = '无法从 CF 边缘连接 YouTube 元数据；可继续 AI 直读，标题将在生成时确定'
-  } else {
-    $('pickTitle').textContent = data.title
-    $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
-  }
+  $('pickTitle').textContent = data.title
+  $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
   const list = $('capList'); list.innerHTML = ''
   const sorted = [...data.tracks].sort((a, b) => (a.kind === 'manual' ? -1 : 1))
   sorted.forEach((t, i) => {
     const el = document.createElement('div')
     el.className = 'cap' + (i === 0 ? ' primary' : '')
-    const k = document.createElement('span'); k.className = 'k'
+    const k = document.createElement('span'); k.className = 'k'; k.textContent = t.lang.toUpperCase()
     const l = document.createElement('span'); l.className = 'l'
+    l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
     const r = document.createElement('span'); r.className = 'r'
-    if (t.id === 'gemini.direct') {
-      // fallback card: "AI" badge, no caption-language jargon (AUTO/自动 don't apply)
-      k.textContent = 'AI'
-      l.textContent = t.label
-      r.textContent = '由 AI 直接解析'
-    } else {
-      k.textContent = t.lang.toUpperCase()
-      l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
-      r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
-    }
+    r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
     el.append(k, l, r)
     el.addEventListener('click', () => { el.classList.add('picked'); pickTrack(t.id) })
     list.appendChild(el)
@@ -250,9 +235,6 @@ function enterArticle(metaEv) {
   $('revealSub').textContent = metaEv.subtitle ?? ''
   $('articleH1').textContent = title
   $('articleMeta').textContent = metaParts.join(' · ')
-  $('articleDisclaimer').textContent = state.isFallback
-    ? '本次生成走 AI 直读（YouTube 元信息抓取失败），标题由 AI 在生成时给出'
-    : ''
   document.title = title
   hideAllViews()
   const rv = $('revealView')
@@ -335,7 +317,7 @@ const ERROR_COPY = {
   INVALID_URL: '这不是一个合法的 YouTube 链接',
   VIDEO_NOT_FOUND: '视频不存在或已删除',
   NO_CAPTIONS: '这个视频没有可用字幕',
-  YOUTUBE_BLOCKED: 'YouTube 拒绝了请求，请稍后再试',
+  YOUTUBE_BLOCKED: '当前环境无法连接 YouTube（数据中心 IP 常见），请本地运行 npm run dev 或配置代理',
   GEMINI_AUTH: 'Gemini 配置异常（API key 无效或过期）',
   GEMINI_RATE_LIMIT: 'Gemini 速率限制，请稍后再试',
   GEMINI_QUOTA: 'Gemini 免费额度已用尽',
@@ -351,7 +333,6 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null
-  state.isFallback = false
   renderRailReq()
   state.articleEnded = false
   state.aborter = null
@@ -363,7 +344,6 @@ function resetRun() {
   // Reset reveal/article classes so replay works cleanly
   $('revealView').classList.remove('play')
   $('articleView').classList.remove('show')
-  $('articleDisclaimer').textContent = ''
   $('statusPill').classList.remove('err')
   setStatus('idle')
 }
