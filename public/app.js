@@ -3,6 +3,7 @@ const state = {
   mode: 'rewrite',
   reqId: null,
   aborter: null,
+  revealTimer: null,   // setTimeout handle for the reveal→article transition
   stage: 'idle',
   tracks: null,
   meta: null,
@@ -235,9 +236,14 @@ function enterArticle(metaEv) {
   $('articleMeta').textContent = metaEv.subtitle + ' · ' + fmtDur(metaEv.durationSec)
   document.title = metaEv.title
   hideAllViews()
-  const rv = $('revealView'); rv.classList.remove('out')
+  const rv = $('revealView')
+  // Reset animation state so replay works (CSS keyframes won't restart if .play already present)
+  rv.classList.remove('play')
+  void rv.offsetWidth
+  rv.classList.remove('out')
   requestAnimationFrame(() => rv.classList.add('play'))
-  setTimeout(() => {
+  state.revealTimer = setTimeout(() => {
+    state.revealTimer = null
     rv.classList.add('out')
     $('articleView').classList.remove('out')
     $('articleView').classList.add('show')
@@ -322,6 +328,8 @@ function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知
 
 // ---------- Reset ----------
 function resetRun() {
+  // Cancel any in-flight reveal→article transition timer
+  if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null; state.tracks = null; state.meta = null
   state.articleEnded = false; state.cancelled = false
   state.aborter = null
@@ -330,6 +338,8 @@ function resetRun() {
   $('m1').textContent = ''; $('m2').textContent = ''
   $('m3').textContent = ''; $('m4').textContent = ''
   byAll('.step-row').forEach(r => { r.classList.remove('active', 'done', 'err'); r.classList.add('pending') })
+  // Reset reveal animation class so it can replay on next run
+  $('revealView').classList.remove('play')
   $('statusPill').classList.remove('err')
   setStatus('idle')
 }
@@ -411,7 +421,6 @@ function retry() {
 
 function regenerate() {
   resetRun()
-  $('articleBody').innerHTML = ''
   $('articleView').classList.add('out')
   $('articleView').classList.remove('show')
   showView('prepView')
