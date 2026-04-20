@@ -96,8 +96,9 @@ export function extractVideoInfo(html: string) {
 export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
   const html = await fetchWatchPage(videoId, signal)
   const info = extractVideoInfo(html)
-  // 200 but no playerResponse — likely a consent gate; treat as blocked to activate Track 2
-  if (!info) throw new YoutubeError('YOUTUBE_BLOCKED')
+  // Anti-scrape pages occasionally match PR_REGEX but yield an empty PlayerResponse
+  // with no videoDetails.videoId; treat both null and empty-id as blocked.
+  if (!info || !info.videoId) throw new YoutubeError('YOUTUBE_BLOCKED')
   return info
 }
 

@@ -46,7 +46,6 @@ async function inspect(request: Request, env: Env): Promise<Response> {
   try {
     const info = await fetchVideoInfo(videoId, request.signal)
     log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started })
-    if (!info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
 
     const tracks = await Promise.all(info.tracks.map(async t => {
