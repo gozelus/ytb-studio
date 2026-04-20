@@ -1,15 +1,19 @@
 # Copy this file to .dev.vars and fill in your API key.
 # .dev.vars is gitignored — never commit real keys.
 
-# Option A: OpenRouter (recommended — one key, many models)
+# Option A: OpenRouter (recommended — one key, many models; requires PROXY_URLS)
 LLM_PROVIDER=openrouter
 LLM_MODEL=google/gemini-2.5-flash
 LLM_API_KEY=your-openrouter-key-here
 
-# Option B: Google Gemini directly
+# Option B: Google Gemini directly (works without proxy via Gemini direct-read fallback)
 # LLM_PROVIDER=google
 # LLM_MODEL=gemini-2.5-flash
 # LLM_API_KEY=your-gemini-key-here
 
 # Option C: backward-compat shorthand for Google
 # GEMINI_API_KEY=your-gemini-key-here
+
+# SOCKS5 proxy for YouTube fetches (optional; required for non-google providers)
+# Multiple endpoints newline-separated; Worker tries them in order on failure.
+# PROXY_URLS=socks5h://user:pass@host1:port\nsocks5h://user:pass@host2:port
