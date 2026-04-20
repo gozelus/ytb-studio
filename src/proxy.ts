@@ -19,24 +19,29 @@ export function loadProxyConfig(env: { PROXY_URLS?: string; PROXY_URL?: string }
   return urls.length > 0 ? { urls } : null
 }
 
+/** Injectable TCP connect function — defaults to cloudflare:sockets connect; override in tests. */
+export type ConnectFn = (address: SocketAddress, options?: SocketOptions) => Socket
+
 /**
  * Makes an HTTP GET via SOCKS5 proxy. Tries each endpoint in order; moves to the next
  * on connection/handshake failure. Throws if all endpoints fail.
  * init headers are forwarded (except Accept-Encoding — not requesting compression
  * avoids the need to decompress chunked gzip in the manual HTTP parser).
+ * opts._connect is injectable for unit tests; production code uses cloudflare:sockets connect.
  */
 export async function fetchViaSocks5(
   targetUrl: string,
   config: ProxyConfig,
   init: { headers?: Record<string, string>; signal?: AbortSignal } = {},
-  opts: { logFn?: (msg: string) => void } = {},
+  opts: { logFn?: (msg: string) => void; _connect?: ConnectFn } = {},
 ): Promise<Response> {
+  const connectFn = opts._connect ?? connect
   let lastErr: unknown
   for (const proxyUrl of config.urls) {
     const proxyHost = new URL(proxyUrl).hostname + ':' + (new URL(proxyUrl).port || '1080')
     try {
       opts.logFn?.(`proxy.try host=${proxyHost}`)
-      const res = await socks5Fetch(new URL(targetUrl), proxyUrl, init)
+      const res = await socks5Fetch(new URL(targetUrl), proxyUrl, init, connectFn)
       opts.logFn?.(`proxy.ok host=${proxyHost} status=${res.status}`)
       return res
     } catch (err) {
@@ -51,13 +56,14 @@ async function socks5Fetch(
   target: URL,
   proxyUrl: string,
   init: { headers?: Record<string, string>; signal?: AbortSignal },
+  connectFn: ConnectFn,
 ): Promise<Response> {
   const proxy = new URL(proxyUrl)
   const targetPort = target.port ? Number(target.port) : (target.protocol === 'https:' ? 443 : 80)
   const user = decodeURIComponent(proxy.username)
   const pass = decodeURIComponent(proxy.password)
 
-  const socket = connect(
+  const socket = connectFn(
     { hostname: proxy.hostname, port: Number(proxy.port) || 1080 },
     { allowHalfOpen: true },
   )
