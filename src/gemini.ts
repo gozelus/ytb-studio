@@ -56,7 +56,11 @@ async function retryingFetch(
       attempt5xx++; continue
     }
     if (res.status === 429) throw new GeminiError('GEMINI_RATE_LIMIT')
-    throw new GeminiError('GEMINI_TIMEOUT', `status ${res.status}`)
+    // temporary debug — read body for structured error detail (e.g. INVALID_ARGUMENT on 400)
+    const errBody = await res.text().catch(() => '')
+    const snippet = errBody.slice(0, 500)
+    console.log(JSON.stringify({ phase: 'gemini.error_body', status: res.status, body: snippet }))
+    throw new GeminiError('GEMINI_TIMEOUT', `status ${res.status}: ${snippet}`)
   }
 }
 
