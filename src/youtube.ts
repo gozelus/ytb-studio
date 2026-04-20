@@ -1,10 +1,22 @@
 /**
- * [WHAT] YouTube data layer: video-ID parsing, watch-page scraping, InnerTube fallback,
- *        caption track listing, and timed-text XML → plain-text conversion.
- * [WHY]  All YouTube I/O is isolated here so the rest of the worker never touches raw HTML or XML.
- * [INVARIANT] fetchVideoInfo cascades through three tracks: watch page → Android InnerTube →
- *             TV-Embedded InnerTube. Each track falls through only on YOUTUBE_BLOCKED (429/403/5xx).
- *             VIDEO_NOT_FOUND is always re-thrown immediately — a missing video won't succeed on any track.
+ * [WHAT] YouTube 视频元信息与字幕抓取（URL 解析 / 字幕下载 / XML→纯文本）
+ *
+ * [WHY / CF Edge IP Blocking]
+ * Cloudflare Workers 的边缘 IP 被 YouTube 反爬系统主动拦截：
+ *   - `www.youtube.com/watch?v=<id>` → 429 Too Many Requests
+ *   - InnerTube `youtubei/v1/player` (ANDROID / TVHTML5_SIMPLY_EMBEDDED_PLAYER)
+ *     → 400 或 200 但仅返回 `playabilityStatus`，缺 `videoDetails` 与 captions
+ *     （真实数据受 po_token gating 保护，无浏览器 BotGuard 环境无法获得）
+ *
+ * 因此采用两轨方案：
+ *   Track 1 · watch page：少数 CF IP 与时窗仍可通；成本极低，先试
+ *   Track 2 · Gemini fileData：watch 失败时返回合成 track `gemini.direct`，
+ *            /api/generate 直接把 YouTube URL 作为 fileData 喂给 Gemini，
+ *            由 Google 自家 IP 拉取视频与字幕，彻底绕开 CF→YouTube 限制
+ *
+ * [INVARIANT] YoutubeError 的 code ∈ {INVALID_URL, VIDEO_NOT_FOUND,
+ *             NO_CAPTIONS, YOUTUBE_BLOCKED}。YOUTUBE_BLOCKED 触发 Gemini
+ *             fileData 兜底；VIDEO_NOT_FOUND 不兜底（视频真的不存在）。
  */
 
 import type { CaptionTrack } from './types'
@@ -77,38 +89,16 @@ export function extractVideoInfo(html: string) {
 }
 
 /**
- * Fetches video metadata and caption track list, cascading through three tracks on blocking errors.
- * Track 1: watch page; Track 2: Android InnerTube; Track 3: TV-Embedded InnerTube.
+ * Fetches video metadata and caption track list via the watch page (Track 1).
+ * Throws YOUTUBE_BLOCKED if blocked or if the page returns no playerResponse,
+ * which the caller (/api/inspect) converts into the gemini.direct fallback track.
  */
 export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
-  // Track 1: watch page
-  try {
-    const html = await fetchWatchPage(videoId, signal)
-    const info = extractVideoInfo(html)
-    if (info) return info
-    // 200 but no playerResponse (consent gate, etc.) — fall through
-  } catch (err) {
-    // Re-throw only VIDEO_NOT_FOUND — the video is genuinely absent, no fallback will help.
-    // Swallow YOUTUBE_BLOCKED (429/403/5xx) so the next track can attempt an unblocked path.
-    if (err instanceof YoutubeError && err.code === 'VIDEO_NOT_FOUND') throw err
-  }
-
-  // Track 2: Android InnerTube
-  console.log(JSON.stringify({ phase: 'innertube.android.used', videoId }))
-  try {
-    const pr = await fetchPlayerResponseViaInnertube(videoId, signal)
-    if (pr?.videoDetails?.videoId) return playerResponseToInfo(pr)
-    throw new YoutubeError('VIDEO_NOT_FOUND')
-  } catch (err) {
-    if (err instanceof YoutubeError && err.code === 'VIDEO_NOT_FOUND') throw err
-    // YOUTUBE_BLOCKED — fall through to TV Embedded
-  }
-
-  // Track 3: TV-Embedded InnerTube (uses a different quota bucket, less likely to be blocked)
-  console.log(JSON.stringify({ phase: 'innertube.tv.used', videoId }))
-  const pr = await fetchPlayerResponseViaInnertubeTV(videoId, signal)
-  if (!pr?.videoDetails?.videoId) throw new YoutubeError('VIDEO_NOT_FOUND')
-  return playerResponseToInfo(pr)
+  const html = await fetchWatchPage(videoId, signal)
+  const info = extractVideoInfo(html)
+  // 200 but no playerResponse — likely a consent gate; treat as blocked to activate Track 2
+  if (!info) throw new YoutubeError('YOUTUBE_BLOCKED')
+  return info
 }
 
 const TEXT_RE = /<text[^>]*>([\s\S]*?)<\/text>/g
@@ -180,87 +170,9 @@ export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Pro
     },
     signal,
   })
-  // log status for diagnosing CF-edge blocking (temporary)
   console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
   return await res.text()
-}
-
-/**
- * Fetches the player response via the InnerTube Android API.
- * Cloudflare edge IPs are far less likely to be rate-limited by this endpoint than by the watch page,
- * because the Android client fingerprint is treated differently from browser traffic by YouTube's edge.
- */
-export async function fetchPlayerResponseViaInnertube(videoId: string, signal?: AbortSignal): Promise<PlayerResponse | null> {
-  const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'user-agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip',
-      'x-youtube-client-name': '3',
-      'x-youtube-client-version': '19.09.37',
-    },
-    body: JSON.stringify({
-      videoId,
-      context: {
-        client: {
-          clientName: 'ANDROID',
-          clientVersion: '19.09.37',
-          hl: 'en',
-          gl: 'US',
-          androidSdkVersion: 34,
-        },
-      },
-    }),
-    signal,
-  })
-  console.log(JSON.stringify({ phase: 'youtube.innertube.status', videoId, status: res.status }))
-  if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
-  return await res.json() as PlayerResponse
-}
-
-/**
- * Fetches the player response via the InnerTube TV-Embedded client.
- * TVHTML5_SIMPLY_EMBEDDED_PLAYER has a looser rate-limit quota than the Android client,
- * and the embedUrl context signals an embedded (non-direct) request, which YouTube treats differently.
- */
-export async function fetchPlayerResponseViaInnertubeTV(videoId: string, signal?: AbortSignal): Promise<PlayerResponse | null> {
-  const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'user-agent': 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1',
-      'x-youtube-client-name': '85',
-      'x-youtube-client-version': '2.0',
-    },
-    body: JSON.stringify({
-      videoId,
-      context: {
-        client: {
-          clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-          clientVersion: '2.0',
-          hl: 'en',
-          gl: 'US',
-        },
-        thirdParty: { embedUrl: 'https://www.youtube.com' },
-      },
-    }),
-    signal,
-  })
-  console.log(JSON.stringify({ phase: 'youtube.innertube.tv.status', videoId, status: res.status }))
-  if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
-  // temporary debug — remove after root-cause known
-  const json = await res.json() as Record<string, unknown> & { videoDetails?: unknown; captions?: unknown; playabilityStatus?: { reason?: string } }
-  console.log(JSON.stringify({
-    phase: 'tv.keys',
-    videoId,
-    topKeys: Object.keys(json),
-    hasVideoDetails: !!json.videoDetails,
-    hasCaptions: !!json.captions,
-    hasPlayabilityStatus: !!json.playabilityStatus,
-    playabilityReason: json.playabilityStatus?.reason,
-  }))
-  return json as PlayerResponse
 }
 
 /** Fetches raw timed-text XML from a caption track's baseUrl. */
