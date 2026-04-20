@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { loadLlmConfig, countPromptTokens, streamChat, keepaliveTransform, LlmError } from '../src/llm'
+import { loadLlmConfig, streamChat, keepaliveTransform, LlmError } from '../src/llm'
 import type { LlmConfig } from '../src/llm'
 
 function mockFetch(impl: (req: Request) => Promise<Response> | Response) {
@@ -31,81 +31,6 @@ describe('loadLlmConfig', () => {
   it('throws GEMINI_AUTH when no key configured', () => {
     expect(() => loadLlmConfig({})).toThrow(LlmError)
     expect(() => loadLlmConfig({})).toThrow(expect.objectContaining({ code: 'GEMINI_AUTH' }))
-  })
-})
-
-// ── countPromptTokens ─────────────────────────────────────────────────────────
-
-describe('countPromptTokens', () => {
-  const cfg: LlmConfig = { models: ['gemini-2.5-flash'], apiKey: 'fake' }
-
-  beforeEach(() => vi.unstubAllGlobals())
-  afterEach(() => vi.unstubAllGlobals())
-
-  it('POSTs to :countTokens and returns token count', async () => {
-    mockFetch(async req => {
-      expect(req.url).toContain(':countTokens')
-      expect(req.headers.get('x-goog-api-key')).toBe('fake')
-      return new Response(JSON.stringify({ totalTokens: 42 }), { status: 200 })
-    })
-    expect(await countPromptTokens(cfg, 'hello')).toBe(42)
-  })
-
-  it('throws GEMINI_AUTH on 401', async () => {
-    mockFetch(() => new Response('nope', { status: 401 }))
-    await expect(countPromptTokens(cfg, 'x')).rejects.toMatchObject({ code: 'GEMINI_AUTH' })
-  })
-
-  it('retries once on 429 then succeeds (fast sleep)', async () => {
-    let attempt = 0
-    mockFetch(() => {
-      attempt++
-      if (attempt === 1) return new Response('rate limit', { status: 429 })
-      return new Response(JSON.stringify({ totalTokens: 7 }), { status: 200 })
-    })
-    expect(await countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} })).toBe(7)
-    expect(attempt).toBe(2)
-  })
-
-  it('throws GEMINI_RATE_LIMIT after exhausting 429 retries', async () => {
-    let attempt = 0
-    mockFetch(() => { attempt++; return new Response('', { status: 429 }) })
-    await expect(countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} }))
-      .rejects.toMatchObject({ code: 'GEMINI_RATE_LIMIT' })
-    expect(attempt).toBe(3)
-  })
-
-  it('retries 503 up to 3 times then throws GEMINI_OVERLOADED', async () => {
-    let attempt = 0
-    mockFetch(() => {
-      attempt++
-      return new Response('This model is currently experiencing high demand.', { status: 503 })
-    })
-    await expect(countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} }))
-      .rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
-    expect(attempt).toBe(4) // 1 initial + 3 retries
-  })
-
-  it('succeeds if 503 clears before retries exhausted', async () => {
-    let attempt = 0
-    mockFetch(() => {
-      attempt++
-      if (attempt <= 2) return new Response('overloaded', { status: 503 })
-      return new Response(JSON.stringify({ totalTokens: 5 }), { status: 200 })
-    })
-    expect(await countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} })).toBe(5)
-    expect(attempt).toBe(3)
-  })
-
-  it('throws GEMINI_QUOTA immediately on 429 RESOURCE_EXHAUSTED (no retry)', async () => {
-    let attempt = 0
-    mockFetch(() => {
-      attempt++
-      return new Response('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}', { status: 429 })
-    })
-    await expect(countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} }))
-      .rejects.toMatchObject({ code: 'GEMINI_QUOTA' })
-    expect(attempt).toBe(1)
   })
 })
 
@@ -321,13 +246,13 @@ describe('streamChat', () => {
     })
     const chunks: string[] = []
     for await (const c of streamChat(cfg, [
-      { fileData: { fileUri: 'https://www.youtube.com/watch?v=abc123' } },
+      { fileData: { fileUri: 'https://youtu.be/abc123' } },
       { text: 'describe this video' },
     ])) chunks.push(c)
 
     expect(chunks.join('')).toBe('ok')
-    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0].parts
-    expect(parts[0]).toMatchObject({ fileData: { fileUri: 'https://www.youtube.com/watch?v=abc123' } })
+    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0]!.parts
+    expect(parts[0]).toMatchObject({ fileData: { fileUri: 'https://youtu.be/abc123' } })
     expect(parts[1]).toMatchObject({ text: 'describe this video' })
   })
 
@@ -341,7 +266,7 @@ describe('streamChat', () => {
       )
     })
     for await (const _ of streamChat(cfg, 'hello gemini')) { /* drain */ }
-    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0].parts
+    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0]!.parts
     expect(parts).toHaveLength(1)
     expect(parts[0]).toMatchObject({ text: 'hello gemini' })
     expect(parts[0]).not.toHaveProperty('fileData')

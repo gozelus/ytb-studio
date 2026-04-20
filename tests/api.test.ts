@@ -1,0 +1,70 @@
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import worker from '../src/index'
+
+const env = {
+  GEMINI_API_KEY: 'fake',
+  ASSETS: { fetch: async () => new Response('asset') },
+} as any
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('/api/inspect', () => {
+  it('validates URL and returns lightweight metadata without fetching', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const res = await worker.fetch(new Request('https://local.test/api/inspect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: ' https://youtu.be/xRh2sVcNXQ8?t=120 ' }),
+    }), env)
+
+    expect(res.status).toBe(200)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const body = await res.json() as any
+    expect(body).toMatchObject({
+      videoId: 'xRh2sVcNXQ8',
+      url: 'https://youtu.be/xRh2sVcNXQ8?t=120',
+      title: 'YouTube · xRh2sVcNXQ8',
+    })
+    expect(body).not.toHaveProperty('tracks')
+  })
+})
+
+describe('/api/generate', () => {
+  it('ignores legacy trackId and sends the URL as Gemini fileData', async () => {
+    let capturedBody: any
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(input as string, init)
+      expect(req.url).toContain('generativelanguage.googleapis.com')
+      capturedBody = await req.json()
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"{\\"type\\":\\"meta\\",\\"title\\":\\"T\\",\\"subtitle\\":\\"S\\"}\\n{\\"type\\":\\"p\\",\\"speaker\\":null,\\"text\\":\\"正文\\"}\\n"}]}}]}\n\n',
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      )
+    }))
+
+    const res = await worker.fetch(new Request('https://local.test/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        url: ' https://youtu.be/xRh2sVcNXQ8?t=120 ',
+        trackId: 'legacy.track',
+        mode: 'rewrite',
+      }),
+    }), env)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-req-id')).toBeTruthy()
+    const text = await res.text()
+    expect(text).toContain('"type":"meta"')
+    expect(text).toContain('"type":"p"')
+    expect(text).toContain('"type":"end"')
+
+    const parts = capturedBody.contents[0].parts
+    expect(parts[0]).toMatchObject({
+      fileData: { fileUri: 'https://youtu.be/xRh2sVcNXQ8?t=120' },
+    })
+    expect(parts[1].text).toContain('[VIDEO]')
+  })
+})

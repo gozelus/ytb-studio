@@ -1,9 +1,9 @@
 /**
  * [WHAT]  Front-end state machine for ytb-studio.
  * [WHY]   Single JS file — no build step, served as a static asset.
- *         Handles the full user flow: hero → inspect → pick → generate (SSE) → article.
- * [INVARIANT] The first SSE event from /api/generate is always "meta"; only after
- *             receiving it does the reveal animation play and the article view appear.
+ *         Handles the full user flow: hero → inspect → generate (SSE) → article.
+ * [INVARIANT] Meta alone never opens the article view; reveal starts only when the
+ *             first renderable article event arrives.
  *             state.cancelled is set to true before abort() and cleared only at the
  *             entry of a new run (start/retry/regenerate), never inside resetRun().
  */
@@ -12,7 +12,6 @@
 const state = {
   mode: 'rewrite',
   reqId: null,
-  geminiFallbackReason: null,  // set when inspect can't reach YouTube but Gemini direct-read is available
   aborter: null,
   revealTimer: null,     // setTimeout handle for the reveal→article transition
   articleEnded: false,
@@ -26,7 +25,7 @@ const state = {
 const $ = (id) => document.getElementById(id)
 const $$ = (sel) => document.querySelector(sel)
 const byAll = (sel) => document.querySelectorAll(sel)
-const VIEWS = ['prepView', 'pickView', 'revealView', 'articleView']
+const VIEWS = ['prepView', 'revealView', 'articleView']
 
 function showView(which) {
   for (const v of VIEWS) $(v).classList.toggle('out', v !== which)
@@ -119,66 +118,27 @@ async function runInspect(url) {
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
-  state.geminiFallbackReason = data.gemini_fallback_reason ?? null
   renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL' }
 
-  showPicker(data)
-}
-
-// ---------- Picker ----------
-function showPicker(data) {
-  if (state.geminiFallbackReason) {
-    pickTrack('gemini.direct')
-    return
-  }
-  showView('pickView')
-  setStatus('等待选择字幕')
-  $('pickTitle').textContent = data.title
-  $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
-  $('geminiWarning').textContent = ''
-  const list = $('capList'); list.innerHTML = ''
-  const sorted = [...data.tracks].sort((a, b) => (a.kind === 'manual' ? -1 : 1))
-  sorted.forEach((t, i) => {
-    const el = document.createElement('div')
-    el.className = 'cap' + (i === 0 ? ' primary' : '')
-    const k = document.createElement('span'); k.className = 'k'
-    const l = document.createElement('span'); l.className = 'l'
-    const r = document.createElement('span'); r.className = 'r'
-    if (t.id === 'gemini.direct') {
-      k.textContent = 'AI'
-      l.textContent = t.label
-      r.textContent = '由 AI 直接解析'
-    } else {
-      k.textContent = t.lang.toUpperCase()
-      l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
-      r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
-    }
-    el.append(k, l, r)
-    el.addEventListener('click', () => { el.classList.add('picked'); pickTrack(t.id) })
-    list.appendChild(el)
-  })
-}
-
-async function pickTrack(trackId) {
   setStatus('生成中')
   showView('prepView')
   try {
-    await runGenerate(trackId)
+    await runGenerate()
   } catch (err) {
     showInlineError(err)
   }
 }
 
 // ---------- Generate ----------
-async function runGenerate(trackId) {
+async function runGenerate() {
   state.aborter = new AbortController()
   let res
   try {
     res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: $('url').value, trackId, mode: state.mode }),
+      body: JSON.stringify({ url: $('url').value, mode: state.mode }),
       signal: state.aborter.signal,
     })
   } catch (err) {
@@ -188,6 +148,11 @@ async function runGenerate(trackId) {
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({ error: 'INTERNAL' }))
     throw { code: data.error ?? 'INTERNAL' }
+  }
+  const streamReqId = res.headers.get('x-req-id')
+  if (streamReqId) {
+    state.reqId = streamReqId
+    renderRailReq()
   }
   setStatus('唤醒 Gemini')
   startGeminiWait()
@@ -201,6 +166,9 @@ async function consumeSse(body) {
   const decoder = new TextDecoder()
   let buf = ''
   let gotMeta = false
+  let enteredArticle = false
+  let streamEnded = false
+  let metaEv = null
 
   try {
     while (true) {
@@ -214,31 +182,49 @@ async function consumeSse(body) {
         const payload = frame.replace(/^data:\s*/, '')
         if (!payload || payload.startsWith(':')) continue  // skip keepalive lines
         let ev; try { ev = JSON.parse(payload) } catch { continue }
-        if (!gotMeta && ev.type === 'meta') {
+        if (ev.type === 'meta') {
           gotMeta = true
-          stopGeminiWait()
-          setStatus('生成中')
-          enterArticle(ev)
-        } else if (!gotMeta && ev.type === 'error') {
-          // Error arrived before first meta — still in prep stage; show inline error
-          state.articleEnded = true  // prevent GEMINI_STREAM_DROP throw at loop exit
-          showInlineError({ code: ev.code ?? 'INTERNAL' })
-          return
-        } else {
-          renderEvent(ev)
+          metaEv = ev
+          setStatus('生成正文')
+          continue
         }
+        if (!enteredArticle && ev.type === 'heartbeat') {
+          updatePrepHeartbeat(ev.idleSeconds ?? 0)
+          continue
+        }
+        if (!enteredArticle && (ev.type === 'h2' || ev.type === 'h3' || ev.type === 'p')) {
+          enteredArticle = true
+          stopGeminiWait()
+          clearPrepHeartbeat()
+          setStatus('生成中')
+          enterArticle(metaEv ?? fallbackMeta())
+          renderEvent(ev)
+          continue
+        }
+        if (!enteredArticle && ev.type === 'error') {
+          state.articleEnded = true  // prevent GEMINI_STREAM_DROP throw at loop exit
+          showInlineError({ code: ev.code ?? 'INTERNAL', message: ev.message })
+          return
+        }
+        if (!enteredArticle && ev.type === 'end') {
+          state.articleEnded = true
+          showInlineError({ code: 'EMPTY_ARTICLE' })
+          return
+        }
+        if (ev.type === 'end') streamEnded = true
+        renderEvent(ev)
       }
     }
   } catch (err) {
     if (state.cancelled) return
-    if (!gotMeta) throw err
+    if (!enteredArticle) throw err
     showInterrupt('GEMINI_STREAM_DROP')
     return
   }
 
   if (state.cancelled) return
-  if (!gotMeta) throw { code: 'GEMINI_STREAM_DROP' }
-  if (!state.articleEnded) showInterrupt('GEMINI_STREAM_DROP')
+  if (!enteredArticle) throw { code: gotMeta ? 'EMPTY_ARTICLE' : 'GEMINI_STREAM_DROP' }
+  if (!streamEnded && !state.articleEnded) showInterrupt('GEMINI_STREAM_DROP')
 }
 
 // ---------- Article ----------
@@ -265,6 +251,10 @@ function enterArticle(metaEv) {
     state.revealDone = true
     startRenderTick()
   }, 3200)
+}
+
+function fallbackMeta() {
+  return { title: '正在生成文章', subtitle: '', durationSec: null }
 }
 
 function renderEvent(ev) {
@@ -316,7 +306,6 @@ function renderEventNow(ev) {
   }
   node.classList.add('fade-node')
   body.appendChild(node)
-  node.scrollIntoView({ behavior: 'smooth', block: 'end' })
 }
 
 function removeCaret() {
@@ -385,7 +374,7 @@ function updateStallIndicator(s) {
 // ---------- Gemini wait tips ----------
 const GEMINI_TIPS = [
   '分析视频节奏与画面节拍…',
-  '提取字幕与音频信号…',
+  '读取视频语音与文本信号…',
   '识别每位讲话者的声纹与措辞风格…',
   '归纳话题转折与章节结构…',
   '选取最具代表性的对话片段…',
@@ -436,6 +425,23 @@ function setTipToWarm() {
   setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟…')
 }
 
+function updatePrepHeartbeat(s) {
+  if (s >= 20) setTipToWarm()
+  const timer = $('geminiTimer')
+  if (!timer.hidden) {
+    const elapsed = Math.round((Date.now() - generateStartMs) / 1000)
+    timer.textContent = `已等待 ${elapsed}s · Gemini 已静默 ${Math.round(s)}s`
+  }
+}
+
+function clearPrepHeartbeat() {
+  const timer = $('geminiTimer')
+  if (!timer.hidden) {
+    const elapsed = Math.round((Date.now() - generateStartMs) / 1000)
+    timer.textContent = `已等待 ${elapsed}s`
+  }
+}
+
 // ---------- Step controls (no-op: step list removed) ----------
 function activateStep() {}
 function doneStep() {}
@@ -444,9 +450,7 @@ function errorStep() {}
 // ---------- Error copy ----------
 const ERROR_COPY = {
   INVALID_URL: '这不是一个合法的 YouTube 链接',
-  VIDEO_NOT_FOUND: '视频不存在或已删除',
-  NO_CAPTIONS: '这个视频没有可用字幕',
-  YOUTUBE_BLOCKED: '当前环境无法连接 YouTube（数据中心 IP 常见），请本地运行 npm run dev 或配置代理',
+  EMPTY_ARTICLE: 'Gemini 没有返回正文，请重试或换一个公开视频。',
   GEMINI_AUTH: 'Gemini API Key 无效或已过期，请检查部署的 GEMINI_API_KEY 配置。',
   GEMINI_QUOTA: 'Gemini 免费额度已用尽（免费档每天仅 20 次）。请为 Gemini key 开启付费计划后重试。',
   GEMINI_RATE_LIMIT: 'Gemini 当前限流，请 30 秒后重试。',
@@ -464,9 +468,7 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null
-  state.geminiFallbackReason = null
   renderRailReq()
-  $('geminiWarning').textContent = ''
   state.articleEnded = false
   state.revealDone = false
   state.renderQueue = []
@@ -474,6 +476,7 @@ function resetRun() {
   state.aborter = null
   $('hintErr').textContent = ''
   $('articleBody').innerHTML = ''
+  $('prepView').querySelectorAll('.interrupt').forEach(n => n.remove())
   clearStallIndicator()
   stopGeminiWait()
   $('newRunBtn').hidden = true
@@ -517,9 +520,8 @@ function ensureInlineActions(container, buttons) {
 function showInlineError(err) {
   stopGeminiWait()
   setStatus('⚠ 已中断', true)
-  const msg = errorMsg(err.code)
-  const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
-  const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
+  const msg = err.message ? `${errorMsg(err.code)} · ${err.message}` : errorMsg(err.code)
+  const host = $('prepView').querySelector('.prep-col')
   if (!host) return
   const actionList = [
     { text: '换视频', onClick: backToHero },

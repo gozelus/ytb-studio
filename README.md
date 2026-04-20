@@ -28,10 +28,9 @@ GEMINI_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro"
 
 ## 工作方式
 
-1. `/api/inspect` 尝试从 CF 边缘抓取 YouTube watch 页面
-2. CF 边缘 IP 通常被 YouTube 拦截 → 自动切换到 **Gemini fileData 路径**
-3. `/api/generate` 把 YouTube URL 作为 fileData 喂给 Gemini，由 Google 自家 IP 拉取视频和字幕
-4. Gemini 流式输出中文文章，以 SSE ndjson 事件流返回前端
+1. `/api/inspect` 只校验 YouTube URL 并解析 videoId，不访问 YouTube
+2. `/api/generate` 把用户输入的 YouTube URL 作为 Gemini `fileData.fileUri`
+3. Gemini 直读视频并流式输出中文文章，以 SSE ndjson 事件流返回前端
 
 ## 本地开发
 
@@ -50,5 +49,4 @@ wrangler deploy
 
 ## Known Limitations
 
-- **CF Workers `startTls` on SOCKS5 tunnels**：CF Workers 的 `connect()` API 支持 `secureTransport:'starttls'`，但在先完成 SOCKS5 握手再升级 TLS 的场景下，`startTls()` 的 TLS 握手会失败（"TLS Handshake Failed"）。这是 CF Workers runtime 的已知限制，非代码 bug。
-  因此，通过 SOCKS5 住宅代理绕过 YouTube IP 封锁的方案不可行；改用 Gemini fileData 让 Google 自家服务器拉取视频是目前唯一可靠路径。
+- 私密、年龄限制、地区不可用或 Gemini 不支持的视频可能无法直读；前端会显示对应的 Gemini 错误。

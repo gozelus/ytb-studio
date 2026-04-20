@@ -138,7 +138,7 @@
     .sparkle.brand-sm { width:22px; height:22px; }
     @keyframes spin { to { transform:rotate(360deg); } }
     @keyframes breath { 0%,100% { opacity:.85; transform:scale(.95);} 50%{opacity:1; transform:scale(1.05);} }
-    /* Stage-logo AI-thinking animation (prep / pick views) */
+    /* Stage-logo AI-thinking animation */
     .sparkle .ai-core {
       transform-origin:center; transform-box:view-box;
       animation:ai-breath 2.4s ease-in-out infinite;
@@ -182,25 +182,6 @@
     .gemini-timer { width:380px; max-width:85vw; font-size:11px; color:var(--subtle);
       font-family:'JetBrains Mono', monospace; opacity:.55; margin-top:4px; }
     .gemini-timer[hidden] { display:none; }
-    /* Picker */
-    .picker { width:420px; max-width:88%; display:flex; flex-direction:column; gap:10px; align-items:center; }
-    .cap { width:100%; border:1px solid var(--border); border-radius:6px;
-      padding:10px 14px; display:flex; align-items:center; gap:12px;
-      font-size:14px; cursor:pointer;
-      transition:border-color .2s, background .2s;
-      opacity:0; transform:translateY(6px); filter:blur(2px);
-      animation:capIn .7s cubic-bezier(.22,1,.36,1) forwards; }
-    .cap:nth-child(2) { animation-delay:.12s; }
-    .cap:nth-child(3) { animation-delay:.22s; }
-    .cap:nth-child(4) { animation-delay:.32s; }
-    @keyframes capIn { to { opacity:1; transform:none; filter:none; } }
-    .cap:hover { border-color:var(--fg); }
-    .cap.primary { border-color:var(--accent); }
-    .cap.picked { background:color-mix(in srgb, var(--accent) 12%, transparent); }
-    .cap .k { font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--accent); width:28px; }
-    .cap .l { flex:1; }
-    .cap .r { font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--subtle); }
-
     /* Reveal */
     .reveal { position:absolute; inset:54px 0 0 0; display:flex;
       flex-direction:column; align-items:center; justify-content:center;
@@ -296,17 +277,6 @@
     .stall-actions .btn-primary { background:var(--accent); color:var(--bg); border:none; }
     .stall-actions .btn-ghost { background:transparent; color:var(--subtle);
       border:1px solid var(--border); }
-    .fallback-banner {
-      background:color-mix(in srgb,var(--warn) 12%,var(--bg));
-      border:1px solid var(--warn-border);
-      border-radius:6px;
-      padding:10px 14px;
-      font-size:12px;
-      color:var(--fg);
-      margin-bottom:12px;
-      line-height:1.6;
-    }
-    .fallback-banner:empty { display:none; }
     .interrupt-req {
       font-family:'JetBrains Mono', monospace;
       font-size:10px;
@@ -349,7 +319,7 @@
         <div class="h-title">ytb-studio</div>
       </div>
       <div class="input-wrap">
-        <input id="url" placeholder="粘贴一个有字幕的 YouTube 链接" autofocus>
+        <input id="url" placeholder="粘贴 YouTube 链接" autofocus>
         <button class="go" id="go">生成</button>
       </div>
       <div class="hint-err" id="hintErr"></div>
@@ -369,17 +339,6 @@
         </div>
         <div id="geminiTip" class="gemini-tip" hidden></div>
         <div id="geminiTimer" class="gemini-timer" hidden></div>
-      </div>
-    </div>
-
-    <!-- Picker -->
-    <div class="stage view out" id="pickView">
-      <div class="picker">
-        <svg class="sparkle stage-logo" viewBox="-50 -50 100 100"><g class="ai-core"><path class="bar-h" d="M-30 0 C-10 -1 -1 -10 0 -30 C1 -10 10 -1 30 0 C10 1 1 10 0 30 C-1 10 -10 1 -30 0 Z"/></g><g class="ai-orbit"><circle class="dot" cx="0" cy="-42" r="2.5"/><circle class="dot" cx="36.37" cy="21" r="2.5"/><circle class="dot" cx="-36.37" cy="21" r="2.5"/></g></svg>
-        <div class="prep-title" id="pickTitle">—</div>
-        <div class="prep-meta" id="pickMeta">选择一条字幕继续</div>
-        <div class="fallback-banner" id="geminiWarning"></div>
-        <div id="capList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
       </div>
     </div>
 

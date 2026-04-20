@@ -1,10 +1,9 @@
 /**
- * [WHAT] Gemini API client: token counting, streaming chat, and SSE keepalive.
+ * [WHAT] Gemini API client: streaming chat and SSE keepalive.
  * [WHY]  Single-provider (Google Gemini) keeps the codebase minimal; Gemini fileData
- *        lets Google's own servers fetch YouTube videos, bypassing CF edge IP blocks.
- * [INVARIANT] streamChat yields raw text increments. countPromptTokens returns the
- *             exact token count via :countTokens (used as a UI hint for track selection).
- *             API key is always in a request header (never in the URL) to prevent leakage.
+ *        lets Google's own servers read YouTube videos from a fileData URI.
+ * [INVARIANT] streamChat yields raw text increments. API key is always in a request
+ *             header (never in the URL) to prevent leakage.
  */
 
 import type { ErrorCode } from './types'
@@ -36,27 +35,6 @@ export function loadLlmConfig(env: Env): LlmConfig {
   const modelsStr = env.GEMINI_MODELS ?? env.GEMINI_MODEL ?? DEFAULT_MODELS
   const models = modelsStr.split(',').map(s => s.trim()).filter(Boolean)
   return { models, apiKey: env.GEMINI_API_KEY }
-}
-
-/**
- * Token count for the given text via Gemini :countTokens endpoint.
- * Used as a UI hint for track selection; not a hard limit.
- */
-export async function countPromptTokens(
-  cfg: LlmConfig,
-  text: string,
-  signal?: AbortSignal,
-  opts: { sleepFn?: (ms: number) => Promise<void> } = {},
-): Promise<number> {
-  const base = 'https://generativelanguage.googleapis.com/v1beta'
-  const res = await retryingFetch(`${base}/models/${cfg.models[0]}:countTokens`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
-    body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
-    signal,
-  }, { sleepFn: opts.sleepFn, signal })
-  const data = await res.json() as { totalTokens?: number }
-  return data.totalTokens ?? 0
 }
 
 /** Streams the Gemini response as raw text increments, with cascading model fallback. */

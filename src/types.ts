@@ -1,5 +1,5 @@
 /**
- * [WHAT] Shared TypeScript types for the entire worker: modes, caption data, stream events, error codes.
+ * [WHAT] Shared TypeScript types for the entire worker: modes, stream events, error codes.
  * [WHY]  Single source of truth imported by all modules; keeps circular-dependency risk at zero.
  * [INVARIANT] The StreamEvent union is exhaustive — adding a new event type here requires updating
  *             the parser's VALID_TYPES set and the frontend renderer simultaneously.
@@ -7,26 +7,8 @@
 
 export type Mode = 'rewrite' | 'faithful'
 
-export type CaptionKind = 'manual' | 'auto'
-
-export interface CaptionTrack {
-  id: string
-  lang: string
-  label: string
-  kind: CaptionKind
-  baseUrl: string
-  tokens?: number
-}
-
-export interface VideoMeta {
-  videoId: string
-  title: string
-  channel: string
-  durationSec: number
-}
-
 export type StreamEvent =
-  | { type: 'meta';      reqId: string; title: string; subtitle: string; durationSec: number }
+  | { type: 'meta';      reqId?: string; title: string; subtitle?: string; durationSec?: number | null }
   | { type: 'h2';        text: string }
   | { type: 'h3';        text: string }
   | { type: 'p';         speaker: string | null; text: string }
@@ -36,9 +18,6 @@ export type StreamEvent =
 
 export type ErrorCode =
   | 'INVALID_URL'
-  | 'VIDEO_NOT_FOUND'
-  | 'NO_CAPTIONS'
-  | 'YOUTUBE_BLOCKED'
   | 'GEMINI_AUTH'
   | 'GEMINI_OVERLOADED'
   | 'GEMINI_STALL'

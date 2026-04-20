@@ -5,7 +5,7 @@
  *             logged on every generate request so regressions can be correlated to prompt edits.
  */
 
-import type { Mode, VideoMeta } from './types'
+import type { Mode } from './types'
 
 /** Bump when CONTRACT or mode rules change; logged per-request for regression tracing. */
 export const PROMPT_VERSION = 'v1'
@@ -81,8 +81,8 @@ const FEW_SHOT = [
 ].join('\n\n')
 
 /**
- * Prompt for the Gemini-direct (fileData) path where Gemini fetches the video itself.
- * No [VIDEO META] or [TRANSCRIPT] sections — Gemini extracts them from the attached fileData.
+ * Prompt for the Gemini fileData path where Gemini fetches the video itself.
+ * No [VIDEO META] or [TRANSCRIPT] sections; Gemini extracts them from the attached fileData.
  */
 export function buildPromptForVideo(mode: Mode): string {
   const rules = mode === 'rewrite' ? REWRITE_RULES : FAITHFUL_RULES
@@ -94,17 +94,3 @@ export function buildPromptForVideo(mode: Mode): string {
     '\n[VIDEO] 附件中是一段 YouTube 视频。请基于视频的字幕（优先）或音轨产出文章，遵守上述事件 schema 与模式规则。',
   ].join('\n\n')
 }
-
-/** Assembles the full LLM prompt: CONTRACT + mode rules + speaker rules + few-shot + meta + transcript. */
-export function buildPrompt(mode: Mode, meta: VideoMeta, transcript: string): string {
-  const rules = mode === 'rewrite' ? REWRITE_RULES : FAITHFUL_RULES
-  return [
-    CONTRACT,
-    rules,
-    SPEAKER_RULES,
-    FEW_SHOT,
-    `\n[VIDEO META]\ntitle: ${meta.title}\nchannel: ${meta.channel}\nduration: ${meta.durationSec}s`,
-    `\n[TRANSCRIPT]\n${transcript}`,
-  ].join('\n\n')
-}
-
