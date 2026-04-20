@@ -264,7 +264,7 @@ async function consumeSse(body) {
           continue
         }
         if (!enteredArticle && ev.type === 'heartbeat') {
-          updatePrepHeartbeat(ev.idleSeconds ?? 0)
+          updatePrepHeartbeat(ev.idleSeconds ?? 0, ev.stage)
           continue
         }
         if (!enteredArticle && (ev.type === 'h2' || ev.type === 'h3' || ev.type === 'p')) {
@@ -506,12 +506,24 @@ function setTipToWarm() {
   setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟…')
 }
 
-function updatePrepHeartbeat(s) {
-  if (s >= 20) setTipToWarm()
+function setLongVideoTip() {
+  const el = $('geminiTip')
+  if (el.hidden) return
+  tipWarmLocked = true
+  el.className = 'gemini-tip warm'
+  setTipText('发现长视频，处理可能需要更长的时间，请耐心等待…')
+}
+
+function updatePrepHeartbeat(s, stage = '') {
+  const isLongVideo = String(stage).startsWith('long_video_')
+  if (isLongVideo) setLongVideoTip()
+  else if (s >= 20) setTipToWarm()
   const timer = $('geminiTimer')
   if (!timer.hidden) {
     const elapsed = Math.round((Date.now() - generateStartMs) / 1000)
-    timer.textContent = `已等待 ${elapsed}s · Gemini 已静默 ${Math.round(s)}s`
+    timer.textContent = isLongVideo
+      ? `已等待 ${elapsed}s · 长视频分段处理中`
+      : `已等待 ${elapsed}s · Gemini 已静默 ${Math.round(s)}s`
   }
 }
 

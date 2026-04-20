@@ -134,6 +134,7 @@ async function generateViaGeminiFileData(
           && full.events === 0
         if (!shouldSegment) throw err
         log({ reqId, route: '/api/generate', phase: 'long_video.segment_fallback', videoId, mode, reason: err instanceof LlmError ? err.code : 'unknown' })
+        await writeEvent({ type: 'heartbeat', idleSeconds: 0, stage: 'long_video_fallback' })
         const segmentedEvents = await streamLongVideoSegments({
           cfg,
           env,

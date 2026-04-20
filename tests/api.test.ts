@@ -102,6 +102,7 @@ describe('/api/generate', () => {
 
     expect(res.status).toBe(200)
     const text = await res.text()
+    expect(text).toContain('"stage":"long_video_fallback"')
     expect(text).toContain('"title":"Long"')
     expect(text).toContain('分段正文')
     expect(text).toContain('GEMINI_LONG_VIDEO_LIMIT')
