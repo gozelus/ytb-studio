@@ -8,7 +8,7 @@
 
 import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
 import { countPromptTokens, streamChat, keepaliveTransform, LlmError, loadLlmConfig } from './llm'
-import { buildPrompt, buildPromptForVideo, PROMPT_VERSION } from './prompt'
+import { buildPrompt, PROMPT_VERSION } from './prompt'
 import { createNdjsonParser } from './parser'
 import { log, logError, newReqId } from './log'
 import type { ErrorCode, Mode, StreamEvent } from './types'
@@ -73,19 +73,6 @@ async function inspect(request: Request, env: Env): Promise<Response> {
     log({ reqId, route: '/api/inspect', phase: 'done', durMs: Date.now() - started, trackCount: tracks.length })
     return json(200, { reqId, videoId: info.videoId, title: info.title, channel: info.channel, durationSec: info.durationSec, tracks })
   } catch (err) {
-    // All three YouTube tracks failed with YOUTUBE_BLOCKED — fall back to Gemini-direct mode.
-    // Return a synthetic track so the picker can still offer one option.
-    if (err instanceof YoutubeError && err.code === 'YOUTUBE_BLOCKED') {
-      log({ reqId, route: '/api/inspect', phase: 'inspect.fallback_to_gemini', videoId, durMs: Date.now() - started })
-      return json(200, {
-        reqId,
-        videoId,
-        title: `YouTube · ${videoId}`,
-        channel: null,
-        durationSec: null,
-        tracks: [{ id: 'gemini.direct', lang: 'auto', label: 'AI 直读（未获取原始字幕）', kind: 'auto', tokens: 0 }],
-      })
-    }
     const code: ErrorCode = err instanceof YoutubeError ? err.code
       : err instanceof LlmError ? err.code
       : 'INTERNAL'
@@ -109,10 +96,6 @@ async function generate(request: Request, env: Env): Promise<Response> {
   if (!videoId || !body.trackId) return json(400, { reqId, error: 'INVALID_URL' })
 
   log({ reqId, route: '/api/generate', phase: 'start', videoId, mode, trackId: body.trackId, promptVer: PROMPT_VERSION })
-
-  if (body.trackId === 'gemini.direct') {
-    return generateViaFileData(request, env, reqId, videoId, mode, started)
-  }
 
   let title: string, channel: string, durationSec: number, transcript: string
   try {
@@ -151,62 +134,6 @@ async function generate(request: Request, env: Env): Promise<Response> {
       // emit our own so the client sees exactly one meta (first, with reqId) and one end (last).
       const parser = createNdjsonParser(e => {
         if (e.type === 'meta') return
-        if (e.type === 'end') return
-        writeEvent(e)
-        events++
-      })
-      for await (const chunk of streamChat(cfg, prompt, request.signal)) {
-        if (firstChunk) { log({ reqId, phase: 'llm.first', durMs: Date.now() - started }); firstChunk = false }
-        parser.feed(chunk)
-      }
-      parser.end()
-      await writeEvent({ type: 'end' })
-      log({ reqId, phase: 'done', durMs: Date.now() - started, events })
-    } catch (err) {
-      const code: ErrorCode = err instanceof LlmError ? err.code : 'LLM_STREAM_DROP'
-      logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
-      await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
-    } finally {
-      try { await writer.close() } catch { /* ignore */ }
-    }
-  })()
-
-  return new Response(ka.readable, {
-    status: 200,
-    headers: {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache, no-transform',
-      'x-accel-buffering': 'no',
-    },
-  })
-}
-
-async function generateViaFileData(
-  request: Request,
-  env: Env,
-  reqId: string,
-  videoId: string,
-  mode: Mode,
-  started: number,
-): Promise<Response> {
-  const cfg = loadLlmConfig(env)
-  const prompt = buildPromptForVideo(mode)
-
-  log({ reqId, route: '/api/generate', phase: 'gemini.direct.start', videoId, mode })
-
-  // 15 s keepalive interval is half of CF's 30 s idle stream timeout.
-  const ka = keepaliveTransform(15_000)
-  const writer = ka.writable.getWriter()
-  const enc = new TextEncoder()
-  const writeEvent = (e: StreamEvent) =>
-    writer.write(enc.encode(`data: ${JSON.stringify(e)}\n\n`)).catch(() => {})
-
-  ;(async () => {
-    let firstChunk = true
-    let events = 0
-    try {
-      await writeEvent({ type: 'meta', reqId, title: `YouTube · ${videoId}`, subtitle: '', durationSec: 0 })
-      const parser = createNdjsonParser(e => {
         if (e.type === 'end') return
         writeEvent(e)
         events++
