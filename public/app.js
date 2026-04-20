@@ -264,7 +264,7 @@ async function consumeSse(body) {
           continue
         }
         if (!enteredArticle && ev.type === 'heartbeat') {
-          updatePrepHeartbeat(ev.idleSeconds ?? 0, ev.stage)
+          updatePrepHeartbeat(ev.idleSeconds ?? 0, ev.stage, ev)
           continue
         }
         if (!enteredArticle && (ev.type === 'h2' || ev.type === 'h3' || ev.type === 'p')) {
@@ -466,6 +466,7 @@ const GEMINI_TIPS = [
 ]
 let tipTimerHandle = null, elapsedTimerHandle = null
 let tipIndexRef = 0, generateStartMs = 0, tipWarmLocked = false
+const MAX_FALLBACK_LOGS = 5
 
 function setTipText(text) {
   const el = $('geminiTip')
@@ -476,6 +477,7 @@ function setTipText(text) {
 function startGeminiWait() {
   tipWarmLocked = false; tipIndexRef = 0; generateStartMs = Date.now()
   const tip = $('geminiTip'), timer = $('geminiTimer')
+  clearFallbackLog()
   tip.hidden = false; tip.className = 'gemini-tip'; tip.textContent = GEMINI_TIPS[0]
   timer.hidden = false; timer.textContent = '已等待 0s · 预估 1–3 分钟'
   tipTimerHandle = setInterval(() => {
@@ -495,6 +497,7 @@ function stopGeminiWait() {
   if (elapsedTimerHandle) { clearInterval(elapsedTimerHandle); elapsedTimerHandle = null }
   tipWarmLocked = false
   $('geminiTip').hidden = true; $('geminiTimer').hidden = true
+  clearFallbackLog()
 }
 
 function setTipToWarm() {
@@ -506,25 +509,60 @@ function setTipToWarm() {
   setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟…')
 }
 
-function setLongVideoTip() {
-  const el = $('geminiTip')
-  if (el.hidden) return
-  tipWarmLocked = true
-  el.className = 'gemini-tip warm'
-  setTipText('发现长视频，处理可能需要更长的时间，请耐心等待…')
-}
-
-function updatePrepHeartbeat(s, stage = '') {
-  const isLongVideo = String(stage).startsWith('long_video_')
-  if (isLongVideo) setLongVideoTip()
-  else if (s >= 20) setTipToWarm()
+function updatePrepHeartbeat(s, stage = '', ev = {}) {
+  const isLongVideoStage = String(stage).startsWith('long_video_')
+  const isFallbackStage = stage === 'long_video_fallback' || stage === 'model_fallback'
+  if (isFallbackStage) {
+    appendFallbackLog(stage, ev)
+    return
+  }
+  if (!isLongVideoStage && s >= 20) setTipToWarm()
   const timer = $('geminiTimer')
   if (!timer.hidden) {
-    const elapsed = Math.round((Date.now() - generateStartMs) / 1000)
-    timer.textContent = isLongVideo
-      ? `已等待 ${elapsed}s · 长视频分段处理中`
-      : `已等待 ${elapsed}s · Gemini 已静默 ${Math.round(s)}s`
+    timer.textContent = `已等待 ${Math.round((Date.now() - generateStartMs) / 1000)}s · Gemini 已静默 ${Math.round(s)}s`
   }
+}
+
+function appendFallbackLog(stage, ev) {
+  const log = $('fallbackLog')
+  if (!log) return
+  const row = document.createElement('div')
+  row.className = 'fallback-row'
+  const time = document.createElement('span')
+  time.className = 'time'
+  time.textContent = fmtWaitElapsed()
+  const text = document.createElement('span')
+  text.textContent = fallbackLogText(stage, ev)
+  row.append(time, text)
+  log.appendChild(row)
+  while (log.children.length > MAX_FALLBACK_LOGS) log.firstElementChild?.remove()
+  log.hidden = false
+}
+
+function fallbackLogText(stage, ev) {
+  if (stage === 'long_video_fallback') {
+    return '发现长视频，处理可能需要更长的时间，请耐心等待...'
+  }
+  if (stage === 'model_fallback') {
+    const from = ev.from || '当前模型'
+    const to = ev.to || '备用模型'
+    return `${from} 响应不佳，已切换到 ${to} 继续生成`
+  }
+  return '已调整生成策略，继续等待 Gemini 输出'
+}
+
+function fmtWaitElapsed() {
+  const s = Math.max(0, Math.round((Date.now() - generateStartMs) / 1000))
+  const m = Math.floor(s / 60).toString().padStart(2, '0')
+  const sec = (s % 60).toString().padStart(2, '0')
+  return `${m}:${sec}`
+}
+
+function clearFallbackLog() {
+  const log = $('fallbackLog')
+  if (!log) return
+  log.innerHTML = ''
+  log.hidden = true
 }
 
 function clearPrepHeartbeat() {

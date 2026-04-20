@@ -120,6 +120,9 @@ async function generateViaGeminiFileData(
             return true
           },
           onHeartbeat: idleSeconds => writeEvent({ type: 'heartbeat', idleSeconds, stage: 'upstream_thinking' }),
+          onModelFallback: (from, to, reason) => {
+            void writeEvent({ type: 'heartbeat', idleSeconds: 0, stage: 'model_fallback', from, to, reason })
+          },
           progress: full,
           initialResponseTimeoutMs: FULL_VIDEO_FIRST_BYTE_TIMEOUT_MS,
           idleTimeoutMs: FULL_VIDEO_FIRST_BYTE_TIMEOUT_MS,
@@ -228,6 +231,9 @@ async function streamLongVideoSegments(opts: {
           return true
         },
         onHeartbeat: idleSeconds => opts.writeEvent({ type: 'heartbeat', idleSeconds, stage: `long_video_segment_${segmentIndex + 1}` }),
+        onModelFallback: (from, to, reason) => {
+          void opts.writeEvent({ type: 'heartbeat', idleSeconds: 0, stage: 'model_fallback', from, to, reason })
+        },
         progress,
         initialResponseTimeoutMs: SEGMENT_FIRST_BYTE_TIMEOUT_MS,
         idleTimeoutMs: SEGMENT_FIRST_BYTE_TIMEOUT_MS,
@@ -294,6 +300,7 @@ async function streamVideoNdjson(opts: {
   noFallbackCodes?: ErrorCode[]
   onEvent: (e: StreamEvent) => boolean | void
   onHeartbeat: (idleSeconds: number) => void
+  onModelFallback?: (from: string, to: string, reason: ErrorCode) => void
 }): Promise<void> {
   let parser: ReturnType<typeof createNdjsonParser> | null = null
   const controller = new AbortController()
@@ -311,6 +318,7 @@ async function streamVideoNdjson(opts: {
       mediaResolution: 'MEDIA_RESOLUTION_LOW',
       noFallbackCodes: opts.noFallbackCodes,
       onHeartbeat: opts.onHeartbeat,
+      onModelFallback: opts.onModelFallback,
     })
     const iter = stream[Symbol.asyncIterator]()
     const deadlineAt = opts.firstTextTimeoutMs ? Date.now() + opts.firstTextTimeoutMs : 0

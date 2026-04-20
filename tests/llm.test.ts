@@ -304,6 +304,7 @@ describe('streamChat — model fallback', () => {
 
   it('falls back to second model when first throws GEMINI_OVERLOADED', async () => {
     const models: string[] = []
+    const fallbackEvents: Array<{ from: string; to: string; reason: string }> = []
     // Use SSE-body error (HTTP 200) to avoid retryingFetch's real sleep delays
     mockFetch(req => {
       const model = new URL(req.url).pathname.split('/models/')[1]?.split(':')[0] ?? ''
@@ -320,10 +321,17 @@ describe('streamChat — model fallback', () => {
     })
     const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
     const chunks: string[] = []
-    for await (const c of streamChat(cfg, 'p')) chunks.push(c)
+    for await (const c of streamChat(cfg, 'p', undefined, {
+      onModelFallback: (from, to, reason) => fallbackEvents.push({ from, to, reason }),
+    })) chunks.push(c)
     expect(chunks.join('')).toBe('ok')
     expect(models[0]).toBe('gemini-2.5-flash')
     expect(models[1]).toBe('gemini-2.5-flash-lite')
+    expect(fallbackEvents).toEqual([{
+      from: 'gemini-2.5-flash',
+      to: 'gemini-2.5-flash-lite',
+      reason: 'GEMINI_OVERLOADED',
+    }])
   })
 
   it('does NOT fall back when first model throws GEMINI_AUTH (non-retryable)', async () => {

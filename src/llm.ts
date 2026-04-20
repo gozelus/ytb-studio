@@ -55,6 +55,7 @@ export async function* streamChat(
     mediaResolution?: 'MEDIA_RESOLUTION_LOW' | 'MEDIA_RESOLUTION_MEDIUM' | 'MEDIA_RESOLUTION_HIGH'
     noFallbackCodes?: ErrorCode[]
     onHeartbeat?: (idleSeconds: number) => void
+    onModelFallback?: (from: string, to: string, reason: ErrorCode) => void
   } = {},
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
@@ -65,7 +66,7 @@ export async function* streamChat(
     'GEMINI_QUOTA',       // 429 quota exhausted (per-model on free tier)
     'GEMINI_TIMEOUT',     // catch-all transient upstream errors (500/504/unknown 4xx)
     'GEMINI_STREAM_DROP', // network/stream severed before first token
-      'GEMINI_STALL',       // 120s no tokens before first token — next model may respond
+    'GEMINI_STALL',       // 120s no tokens before first token — next model may respond
   ])
   const noFallbackCodes = new Set(opts.noFallbackCodes ?? [])
 
@@ -86,6 +87,7 @@ export async function* streamChat(
       if (!firstTokenSeen && err instanceof LlmError && noFallbackCodes.has(err.code)) throw err
       if (!firstTokenSeen && err instanceof LlmError && fallbackTriggers.has(err.code) && i < cfg.models.length - 1) {
         log({ phase: 'llm.fallback', from: model, to: cfg.models[i + 1], reason: err.code })
+        opts.onModelFallback?.(model, cfg.models[i + 1]!, err.code)
         continue
       }
       throw err
@@ -306,6 +308,7 @@ async function* streamGoogle(
     mediaResolution?: 'MEDIA_RESOLUTION_LOW' | 'MEDIA_RESOLUTION_MEDIUM' | 'MEDIA_RESOLUTION_HIGH'
     noFallbackCodes?: ErrorCode[]
     onHeartbeat?: (idleSeconds: number) => void
+    onModelFallback?: (from: string, to: string, reason: ErrorCode) => void
   } = {},
 ) {
   const base = 'https://generativelanguage.googleapis.com/v1beta'

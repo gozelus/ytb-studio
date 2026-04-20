@@ -202,6 +202,22 @@
     .gemini-timer { width:380px; max-width:85vw; font-size:11px; color:var(--subtle);
       font-family:'JetBrains Mono', monospace; opacity:.55; margin-top:4px; }
     .gemini-timer[hidden] { display:none; }
+    .fallback-log { width:380px; max-width:85vw; display:flex; flex-direction:column;
+      gap:6px; margin-top:-6px; font-family:'JetBrains Mono', monospace; }
+    .fallback-log[hidden] { display:none; }
+    .fallback-row { display:flex; align-items:flex-start; gap:8px;
+      font-size:11px; line-height:1.5; color:var(--subtle);
+      animation:fallback-in .55s cubic-bezier(.22,1,.36,1) both; }
+    .fallback-row::before { content:''; flex:0 0 auto; width:5px; height:5px;
+      margin-top:6px; border-radius:50%; background:var(--accent);
+      box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+      animation:fallback-pulse 1.8s ease-in-out infinite; }
+    .fallback-row .time { color:var(--accent); opacity:.8; }
+    @keyframes fallback-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+    @keyframes fallback-pulse {
+      0%,100% { opacity:.45; box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
+      50% { opacity:1; box-shadow:0 0 0 5px transparent; }
+    }
     /* Reveal */
     .reveal { position:absolute; inset:54px 0 0 0; display:flex;
       flex-direction:column; align-items:center; justify-content:center;
@@ -366,6 +382,7 @@
           <div class="prep-meta" id="prepMeta"></div>
         </div>
         <div id="geminiTip" class="gemini-tip" hidden></div>
+        <div id="fallbackLog" class="fallback-log" hidden></div>
         <div id="geminiTimer" class="gemini-timer" hidden></div>
       </div>
     </div>

@@ -13,7 +13,7 @@ export type StreamEvent =
   | { type: 'h3';        text: string }
   | { type: 'p';         speaker: string | null; text: string }
   | { type: 'end' }
-  | { type: 'heartbeat'; idleSeconds: number; stage: string }
+  | { type: 'heartbeat'; idleSeconds: number; stage: string; from?: string; to?: string; reason?: string }
   | { type: 'error';     code: string; message: string }
 
 export type ErrorCode =
