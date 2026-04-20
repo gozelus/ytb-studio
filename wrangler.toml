@@ -7,9 +7,5 @@ compatibility_flags = ["nodejs_compat"]
 directory = "public"
 binding = "ASSETS"
 
-[vars]
-LLM_PROVIDER = "openrouter"
-LLM_MODEL = "google/gemini-2.5-flash"
-
 [observability]
 enabled = true
