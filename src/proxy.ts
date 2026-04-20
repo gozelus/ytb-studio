@@ -77,7 +77,7 @@ async function socks5Fetch(
 
   const socket = connectFn(
     { hostname: proxy.hostname, port: proxyPort },
-    { allowHalfOpen: true, secureTransport: 'starttls' },
+    { secureTransport: 'starttls' },
   )
   log({ phase: 'proxy.tcp.connected', host: `${proxy.hostname}:${proxyPort}` })
 
