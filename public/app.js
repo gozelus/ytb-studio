@@ -226,6 +226,11 @@ async function consumeSse(body) {
           gotMeta = true
           doneStep(4); setStatus('生成中')
           enterArticle(ev)
+        } else if (!gotMeta && ev.type === 'error') {
+          // Error arrived before first meta — still in prep stage; show inline error
+          state.articleEnded = true  // prevent LLM_STREAM_DROP throw at loop exit
+          showInlineError({ code: ev.code ?? 'INTERNAL', step: 4 })
+          return
         } else {
           renderEvent(ev)
         }
@@ -341,6 +346,12 @@ const ERROR_COPY = {
   LLM_SAFETY: '内容触发了 LLM 安全拦截',
   LLM_TIMEOUT: 'LLM 超时',
   LLM_STREAM_DROP: 'LLM 连接断开',
+  GEMINI_AUTH: 'Gemini API Key 无效或已过期，请检查部署的 LLM_API_KEY。',
+  GEMINI_RATE_LIMIT: 'Gemini 当前限流，请 30 秒后重试。',
+  GEMINI_QUOTA: 'Gemini 免费额度已用尽（免费档每天仅 20 次）。请稍后再试，或启用付费计划，或配置 PROXY_URLS 走字幕路径。',
+  GEMINI_SAFETY: '内容触发了 Gemini 的安全策略，该视频无法处理。',
+  GEMINI_STREAM_DROP: 'Gemini 连接中断（通常是网络或超时），请重试。',
+  GEMINI_VIDEO_UNSUPPORTED: '该视频 Gemini 无法直读（私密 / 年龄限制 / 未知格式）。请配置 PROXY_URLS 通过字幕路径生成。',
   INTERNAL: '内部错误',
 }
 function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知'}）` }
