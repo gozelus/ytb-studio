@@ -171,7 +171,7 @@ async function pickTrack(trackId) {
     const r = document.querySelector('.step-row[data-step="3"] .step-t')
     if (r) r.textContent = '准备 Gemini 输入'
   }
-  setStatus('下载字幕')
+  setStatus(trackId === 'gemini.direct' ? '准备 Gemini 输入' : '下载字幕')
   activateStep(3)
   showView('prepView')
   try {
