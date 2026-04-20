@@ -8,7 +8,7 @@
 import type { Mode } from './types'
 
 /** Bump when CONTRACT or mode rules change; logged per-request for regression tracing. */
-export const PROMPT_VERSION = 'v3'
+export const PROMPT_VERSION = 'v4'
 
 const CONTRACT = `
 你是一位中文科技编辑，正在把一段 YouTube 对话重排成可读的中文文章。
@@ -34,11 +34,12 @@ const FIDELITY_RULES = `
 
 const REWRITE_RULES = `
 模式：rewrite（深度改写）
-- 把整段对话聚合为 5–10 个大章节（h2），每章 2–5 个小节（h3）
-- h2 用"主题：副题"格式，如「技术革命：八十年一遇的AI巅峰」
-- h3 是章节内话题导读，简短紧凑
+- 必须输出 6–9 个大章节（h2）完整覆盖对话主线；宁可每章简短，也要把视频后半段讲完，不许在前两章过度展开后被截断
+- 每个 h2 下 2–4 个小节（h3）；每个 h3 下 2–4 段 p；单段 p 控制在 60–220 字
+- h2 严格用「主题：副题」格式（中文全角冒号），如「技术革命：八十年一遇的AI巅峰」、「价值捕捉：按需计费与价值定价」
+- h3 是章节内话题导读，10–22 字，简短紧凑
 - 保留说话人姓名和问答关系；合并碎句；必要处插入极少量衔接说明（speaker=null）
-- 风格参考：晚点 LatePost、虎嗅深度访谈稿
+- 全篇追求"精炼 + 全覆盖"：与其把某章写透，不如让所有主题都出场；风格参考：晚点 LatePost、虎嗅深度访谈稿
 `.trim()
 
 const FAITHFUL_RULES = `
@@ -51,8 +52,11 @@ const FAITHFUL_RULES = `
 const SPEAKER_RULES = `
 字幕无讲话人标签，你需要从对话结构推断：
 - 提问者常以 "How..." / "What about..." / 简短句式反复出现 → 视为主持人
+- 关键线索：若有人说出 "to your point, X" / "thanks for coming, X" 这类直呼姓名的句子，说明 X 是在场的另一位参与者，应作为独立 speaker 使用，即使其台词较少也要单列
+- 若视频有多位主持人或嘉宾，分别给提问和回答段落分配不同姓名，不要把所有问题都归于同一位
 - 若视频标题或描述能看出姓名，使用姓名；否则用 "Host"、"Guest"、"Speaker A"
 - 不要只凭问号改写人物；如果上下文或画面显示某位嘉宾在提问，就使用那位嘉宾的姓名
+- meta.subtitle 里体现出所有已识别的讲话人，例如 "Channel · Host × Guest / Co-host"
 - 推断不出时 speaker 用 null
 `.trim()
 
@@ -122,6 +126,7 @@ export function buildPromptForVideoSegment(
       '[LONG VIDEO SEGMENT]',
       `当前只处理视频片段 ${opts.segmentIndex + 1}：${start} 到 ${end}。`,
       metaRule,
+      '这是长视频分段任务，覆盖范围以当前片段为准；不需要在单个片段内满足全片 6–9 个 h2 的数量要求。',
       '你的输出会直接拼接到同一篇文章里；不要写独立开场、独立总结，禁止发明同义新标题。',
       '如需标题，只能使用上方全局骨架中与当前片段最匹配的原始 h2/h3 标题。',
       '只写当前片段里真实出现的内容，不要概括尚未看到的后续片段。',
