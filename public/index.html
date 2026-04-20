@@ -39,7 +39,9 @@
         <div class="h-title">ytb-studio</div>
       </div>
       <div class="input-wrap">
-        <input id="url" placeholder="粘贴 YouTube 链接" autofocus>
+        <!-- 不加 autofocus：iOS 的"自动聚焦但键盘没起"会让之后用户的第一次点击变成"再聚焦"，
+             系统粘贴菜单会在和真正的聚焦/键盘事件的竞争中被 dismiss 掉。 -->
+        <input id="url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="粘贴 YouTube 链接">
         <button class="go" id="go">生成</button>
       </div>
       <div class="hint-err" id="hintErr"></div>

@@ -17,7 +17,9 @@ body {
   transition:background .5s, color .5s;
   overflow:hidden;
 }
-.frame { height:100vh; height:100dvh; display:flex; position:relative; overflow:hidden; }
+/* 用 svh 代替 dvh：dvh 会随 iOS 键盘弹起而收缩，令 .hero 里的居中输入框瞬间上移，
+   系统粘贴菜单因此被留在旧坐标上一帧内 dismiss。svh 是"最小可视视口"、始终稳定。 */
+.frame { height:100vh; height:100svh; display:flex; position:relative; overflow:hidden; }
 body.share-locked .frame { filter:blur(6px); transform:scale(1.01); opacity:.38; pointer-events:none; }
 
 /* Tools */
