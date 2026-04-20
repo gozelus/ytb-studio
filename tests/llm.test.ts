@@ -22,9 +22,9 @@ describe('loadLlmConfig', () => {
     expect(cfg.models).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro'])
   })
 
-  it('falls back to default 3.1-preview cascade when neither GEMINI_MODELS nor GEMINI_MODEL set', () => {
+  it('falls back to default 3.x-preview cascade when neither GEMINI_MODELS nor GEMINI_MODEL set', () => {
     const cfg = loadLlmConfig({ GEMINI_API_KEY: 'gk' })
-    expect(cfg.models[0]).toBe('gemini-3.1-flash-preview')
+    expect(cfg.models[0]).toBe('gemini-3-flash-preview')
     expect(cfg.models.length).toBeGreaterThan(1)
   })
 

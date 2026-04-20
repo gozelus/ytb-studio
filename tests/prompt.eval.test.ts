@@ -22,7 +22,7 @@ import type { StreamEvent } from '../src/types'
 // @ts-ignore — Vite raw import, bundled at test build time
 import TRANSCRIPT from './fixtures/transcript-xRh2sVcNXQ8.txt?raw'
 
-const testEnv = cfEnv as { GEMINI_API_KEY?: string; RUN_PROMPT_EVAL?: string }
+const testEnv = cfEnv as { GEMINI_API_KEY?: string; GEMINI_MODELS?: string; RUN_PROMPT_EVAL?: string }
 const nodeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
 const apiKey = testEnv.GEMINI_API_KEY
 const shouldRunEval = testEnv.RUN_PROMPT_EVAL === '1' || nodeEnv?.RUN_PROMPT_EVAL === '1'
@@ -46,9 +46,11 @@ function buildEvalPrompt(mode: 'rewrite' | 'faithful') {
 }
 
 async function runPromptOnce(mode: 'rewrite' | 'faithful') {
+  // Match the production default cascade so eval actually exercises the model users hit.
+  // Override via GEMINI_MODELS env if you want to pin a specific model for the eval.
   const cfg = loadLlmConfig({
     GEMINI_API_KEY: apiKey,
-    GEMINI_MODELS: 'gemini-2.5-flash,gemini-2.5-pro',
+    GEMINI_MODELS: testEnv.GEMINI_MODELS ?? nodeEnv?.GEMINI_MODELS,
   })
   const prompt = buildEvalPrompt(mode)
   const events: StreamEvent[] = []

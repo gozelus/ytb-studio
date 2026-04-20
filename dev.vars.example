@@ -9,11 +9,11 @@ SHARECODE=change-this-sharecode
 
 # Optional: cascading model fallback on overload/quota (comma-separated).
 # When the current model returns 503/overloaded/quota, the next is tried automatically.
-# Default: gemini-3.1-flash-preview,gemini-3.1-pro-preview
-# GEMINI_MODELS=gemini-3.1-flash-preview,gemini-3.1-pro-preview
+# Default: gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview
+# GEMINI_MODELS=gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview
 
 # Optional: pin a single model (overridden by GEMINI_MODELS if both are set)
-# GEMINI_MODEL=gemini-3.1-flash-preview
+# GEMINI_MODEL=gemini-3-flash-preview
 
 # Optional: long-video segmentation fallback after Gemini stalls or hits context limits.
 # Still uses Gemini fileData + videoMetadata; no YouTube fetching is performed.
