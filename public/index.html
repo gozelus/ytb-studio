@@ -107,6 +107,11 @@
     .hero .mode-inline .opt.on { color:var(--fg); }
     .hero .hint-err { color:var(--warn); font-family:'JetBrains Mono', monospace;
       font-size:12px; min-height:16px; margin-top:-10px; }
+    @keyframes heroIn { from { opacity:0; transform:translateY(10px); filter:blur(6px); } to { opacity:1; transform:none; filter:none; } }
+    .hero .h-title   { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1)       both; }
+    .hero .h-sub     { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .15s  both; }
+    .hero .input-wrap{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .3s   both; }
+    .hero .mode-inline{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .45s both; }
 
     /* Sparkle logo (inline SVG inside .sparkle elements) */
     .sparkle { display:inline-block; }
