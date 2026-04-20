@@ -40,6 +40,8 @@
 3. Hero 淡出；左栏从左侧滑入；URL "收齐到顶部" pill；sparkle logo 缩到中心
 4. 预处理 4 步（logo 持续旋转呼吸）：
      ① 连接视频   ② 解析字幕轨   ③ 下载字幕   ④ 唤醒 Gemini
+   Step ④ 的语义 = "POST streamGenerateContent 并等待首 token"；
+   Gemini 无独立 warmup 端点，步骤点亮时机以"首 chunk 到达"为准
 5. ② 完成后若发现多条字幕：展开选择卡（手动字幕置顶带星标），用户选一条继续
 6. ④ 完成、首 chunk 到达 → 转场动画：
      圆环发散 → 墨线画开 → H1 标题居中浮现 → 副标题淡入 → 全部消散
@@ -120,15 +122,26 @@ ytb-studio/
   "channel": "a16z",
   "durationSec": 3502,
   "tracks": [
-    { "id":"a.en",   "lang":"en", "label":"English", "kind":"manual", "tokenEstimate":12400 },
-    { "id":"asr.en", "lang":"en", "label":"English", "kind":"auto",   "tokenEstimate":12100 },
-    { "id":"asr.zh", "lang":"zh", "label":"中文",    "kind":"auto",   "tokenEstimate":14000 }
+    { "id":"a.en",   "lang":"en", "label":"English", "kind":"manual", "tokens":12400 },
+    { "id":"asr.en", "lang":"en", "label":"English", "kind":"auto",   "tokens":12100 },
+    { "id":"asr.zh", "lang":"zh", "label":"中文",    "kind":"auto",   "tokens":14000 }
   ]
 }
 
 // Errors (4xx/5xx)
 { "reqId":"…", "error":"INVALID_URL"|"VIDEO_NOT_FOUND"|"NO_CAPTIONS"|"YOUTUBE_BLOCKED" }
 ```
+
+**`tokens` 字段来源**：调用 Gemini 的 `models/gemini-2.5-flash:countTokens` 端点（对所选模型的真实分词），对每条字幕文本计一次，仅用于字幕选择卡的展示。这个端点**不占用生成配额**、为免费，精度优于 `chars × k` 粗估，且零额外 bundle 依赖（复用 `gemini.ts` 的 fetch 即可）。
+
+**错误码映射**（`youtube.ts` → `error` 字段）：
+
+| 触发条件 | error code |
+|---|---|
+| URL 为空 / 非 youtu.be、youtube.com 域 | `INVALID_URL` |
+| watch 页返回 404 或 `ytInitialPlayerResponse` 缺失 | `VIDEO_NOT_FOUND` |
+| `captionTracks` 数组为空或不存在 | `NO_CAPTIONS` |
+| watch 页状态非 200/404（如 403/5xx）、fetch 异常 | `YOUTUBE_BLOCKED` |
 
 ### `POST /api/generate`
 
@@ -167,6 +180,8 @@ Body (按 SSE 帧组织，每帧 data: 一个 ndjson event):
 
 **为何不用 `EventSource`**：EventSource 只支持 GET、无法自定义 header。前端走 `fetch + ReadableStream.getReader()` 手读即可。
 
+**SSE Keepalive**：Gemini 首 chunk 可能等 2–5s，某些企业代理 / CDN 中间层会断长连接。`/api/generate` 每 15s 在空闲期向下游发一行 `: keepalive\n\n`（SSE 注释行，客户端 parser 自动忽略）。实现：在 `gemini.ts` 与 `index.ts` 之间加一个 `TransformStream` 背景定时器，有真数据时不发、空闲满 15s 时发一次。成本几乎为 0，稳定性收益明显。
+
 ## Event Schema
 
 ```ts
@@ -184,6 +199,13 @@ type Event =
 - `end` 必然最后一个（用于判定自然结束 vs 中断）
 - 连接关闭且未收到 `end` = 流中断
 - `p.speaker` 缺失时用 `null`（模型推断不出说话人时）
+
+**Parser 容错策略**（`parser.ts`）：
+- 非法行（空、不以 `{` 开头、JSON.parse 失败、必要字段缺失）→ `logWarn({ reqId, phase:"parser.skip", line })` + 跳过 + 下一行继续
+- 不做任何"尝试修复"——LLM 输出中断的半行等于垃圾，吞掉就好
+- 连续 5 次跳过同类错误时降为采样日志，避免日志洪水
+
+**渲染侧 XSS 防护**：`p.speaker` 与 `p.text` 均用 DOM `textContent` / `createTextNode` 注入，**禁止 `innerHTML`**。`h2 / h3` 同规则。即使 prompt 被越狱、模型返回恶意 HTML，也无法执行。
 
 ## Prompt Design
 
@@ -270,6 +292,13 @@ while (true) {
 | Generate 前 | timedtext 失效、Gemini 401/429/5xx、首 chunk 前超时 | 首 chunk 前：429 指数退避 1s→3s 最多 2 次；网络错 1 次；401/quota 不重试 |
 | Generate 流中 | 流断、malformed 行、安全拦截 | **不重试**，避免已读内容重复 |
 | 用户主动 | 取消 | 静默结束 |
+
+**重试层约定**：所有自动重试**只在 Worker 内**发生。客户端不重试（避免双层 retry 放大压力）。客户端能做的只有"给用户一个明显的 `重试` 按钮"。
+
+**取消信号链路**：
+- 客户端：新请求 / 页面卸载时 `abortController.abort()` → `fetch` 连接关闭
+- Worker：通过 `request.signal` 监听客户端关闭 → 立即关闭上游 Gemini fetch 的 AbortController → 停止 keepalive 定时器 → 打一条 `{phase:"cancelled"}` 日志
+- 这是"静默结束"的实现：无 `error` event、无 UI 提示、日志可查
 
 ### UX 呈现
 
