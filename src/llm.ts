@@ -18,6 +18,8 @@ export interface LlmConfig {
   apiKey: string
 }
 
+export type Part = { text: string } | { fileData: { fileUri: string; mimeType?: string } }
+
 interface Env {
   GEMINI_API_KEY?: string
   GEMINI_MODEL?: string
@@ -59,7 +61,7 @@ export async function countPromptTokens(
 /** Streams the Gemini response as raw text increments. */
 export async function* streamChat(
   cfg: LlmConfig,
-  prompt: string,
+  partsOrPrompt: Part[] | string,
   signal?: AbortSignal,
   opts: {
     _idleTimeoutMs?: number
@@ -68,7 +70,8 @@ export async function* streamChat(
   } = {},
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
-  yield* streamGoogle(cfg, prompt, signal, opts)
+  const parts: Part[] = typeof partsOrPrompt === 'string' ? [{ text: partsOrPrompt }] : partsOrPrompt
+  yield* streamGoogle(cfg, parts, signal, opts)
 }
 
 // ── keepalive ────────────────────────────────────────────────────────────────
@@ -231,7 +234,7 @@ async function* consumeSSE(
 
 async function* streamGoogle(
   cfg: LlmConfig,
-  prompt: string,
+  parts: Part[],
   signal?: AbortSignal,
   opts: { _idleTimeoutMs?: number; _heartbeatIntervalMs?: number; onHeartbeat?: (idleSeconds: number) => void } = {},
 ) {
@@ -240,7 +243,7 @@ async function* streamGoogle(
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
     }),
     signal,
