@@ -39,7 +39,7 @@
     .rail { width:260px; background:var(--rail); border-right:1px solid var(--border);
       padding:54px 18px 20px; display:flex; flex-direction:column; gap:14px;
       transition:width .5s ease, padding .5s ease, margin-left .6s cubic-bezier(.22,1,.36,1);
-      overflow:hidden; flex-shrink:0; margin-left:-260px;
+      overflow:hidden; flex-shrink:0; margin-left:-260px; /* negative margin collapses rail out of flex flow so main fills full width */
       position:relative; }
     .rail.in { margin-left:0; }
     .rail.collapsed { width:40px; padding:54px 6px 20px; }

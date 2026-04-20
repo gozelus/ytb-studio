@@ -1,11 +1,18 @@
+/**
+ * [WHAT]  Front-end state machine for ytb-studio.
+ * [WHY]   Single JS file — no build step, served as a static asset.
+ *         Handles the full user flow: hero → inspect → pick → generate (SSE) → article.
+ * [INVARIANT] The first SSE event from /api/generate is always "meta"; only after
+ *             receiving it does the reveal animation play and the article view appear.
+ *             state.cancelled is set to true before abort() and cleared only at the
+ *             entry of a new run (start/retry/regenerate), never inside resetRun().
+ */
+
 // ---------- State ----------
 const state = {
   mode: 'rewrite',
-  reqId: null,
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
-  tracks: null,
-  meta: null,
   articleEnded: false,
   cancelled: false,
 }
@@ -107,12 +114,9 @@ async function runInspect(url) {
     body: JSON.stringify({ url }),
   })
   const data = await res.json()
-  state.reqId = data.reqId
   $('railReq').textContent = `req · ${data.reqId ?? '—'}`
   if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
 
-  state.tracks = data.tracks
-  state.meta = { title: data.title, channel: data.channel, durationSec: data.durationSec }
   $('m1').textContent = `${fmtDur(data.durationSec)} · ${data.channel}`
   doneStep(1); activateStep(2)
   setStatus('解析字幕')
@@ -188,24 +192,17 @@ async function consumeSse(body) {
   let buf = ''
   let gotMeta = false
 
-  const readNext = async () => {
-    try { return await reader.read() }
-    catch (err) {
-      if (state.cancelled) return { done: true, value: undefined }
-      throw err
-    }
-  }
-
   try {
     while (true) {
-      const { value, done } = await readNext()
+      const { value, done } = await reader.read()
       if (done) break
       buf += decoder.decode(value, { stream: true })
       let i
+      // SSE frames are delimited by double newlines
       while ((i = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, i); buf = buf.slice(i + 2)
         const payload = frame.replace(/^data:\s*/, '')
-        if (!payload || payload.startsWith(':')) continue
+        if (!payload || payload.startsWith(':')) continue  // skip keepalive lines
         let ev; try { ev = JSON.parse(payload) } catch { continue }
         if (!gotMeta && ev.type === 'meta') {
           gotMeta = true
@@ -251,6 +248,7 @@ function enterArticle(metaEv) {
 }
 
 function renderEvent(ev) {
+  // textContent / createTextNode throughout — never innerHTML on LLM output (XSS prevention)
   const body = $('articleBody')
   removeCaret()
   let node
@@ -330,7 +328,6 @@ function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知
 function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
-  state.reqId = null; state.tracks = null; state.meta = null
   state.articleEnded = false
   state.aborter = null
   $('hintErr').textContent = ''
@@ -338,8 +335,9 @@ function resetRun() {
   $('m1').textContent = ''; $('m2').textContent = ''
   $('m3').textContent = ''; $('m4').textContent = ''
   byAll('.step-row').forEach(r => { r.classList.remove('active', 'done', 'err'); r.classList.add('pending') })
-  // Reset reveal animation class so it can replay on next run
+  // Reset reveal/article classes so replay works cleanly
   $('revealView').classList.remove('play')
+  $('articleView').classList.remove('show')
   $('statusPill').classList.remove('err')
   setStatus('idle')
 }
@@ -367,13 +365,14 @@ function ensureInlineActions(container, buttons) {
 // ---------- Prep-phase error ----------
 function showInlineError(err) {
   setStatus('⚠ 已中断', true)
+  const msg = errorMsg(err.code)
   const stepN = err.step ?? parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10)
-  errorStep(stepN, errorMsg(err.code))
+  errorStep(stepN, msg)
   const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
   const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
   if (!host) return
   ensureInlineActions(host, {
-    msg: errorMsg(err.code),
+    msg,
     list: [
       { text: '换视频', onClick: backToHero },
       { text: '重试', primary: true, onClick: retry },
@@ -407,7 +406,8 @@ function backToHero() {
   // Set cancelled before abort() so any async catch in-flight sees it immediately
   state.cancelled = true
   if (state.aborter) state.aborter.abort()
-  $('rail').classList.remove('in')
+  $('rail').classList.remove('in', 'collapsed')
+  $('railToggle').textContent = '‹'
   $('topbar').classList.remove('in')
   hideAllViews()
   $('hero').classList.remove('out')
