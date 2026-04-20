@@ -249,7 +249,10 @@ export async function fetchPlayerResponseViaInnertubeTV(videoId: string, signal?
   })
   console.log(JSON.stringify({ phase: 'youtube.innertube.tv.status', videoId, status: res.status }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
-  return await res.json() as PlayerResponse
+  // temporary: log top-level keys to diagnose missing videoDetails shape
+  const json = await res.json() as Record<string, unknown>
+  console.log(JSON.stringify({ phase: 'tv.keys', videoId, keys: Object.keys(json) }))
+  return json as PlayerResponse
 }
 
 /** Fetches raw timed-text XML from a caption track's baseUrl. */
