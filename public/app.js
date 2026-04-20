@@ -9,6 +9,7 @@
  */
 
 import { $, byAll, hideAllViews, setStatus, showView } from './dom.js'
+import { createArticleRenderer } from './article-renderer.js'
 import { errorMsg } from './error-copy.js'
 import { createGeminiWaitUi } from './gemini-wait.js'
 import { createRailController } from './rail.js'
@@ -46,6 +47,12 @@ const {
   stopGeminiWait,
   updatePrepHeartbeat,
 } = createGeminiWaitUi({ $ })
+
+const {
+  renderEventNow,
+  removeCaret,
+  resetArticleRenderer,
+} = createArticleRenderer({ $, state, registerRailHeading, clearStallIndicator })
 
 function setModeEverywhere(mode) {
   state.mode = mode
@@ -290,42 +297,6 @@ function renderEvent(ev) {
   if (state.revealDone) startRenderTick()
 }
 
-function renderEventNow(ev) {
-  if (ev.type === '__end') { ev.finalize(); return }
-  // textContent / createTextNode throughout — never innerHTML on LLM output (XSS prevention)
-  const body = $('articleBody')
-  removeCaret()
-  let node
-  if (ev.type === 'h2') {
-    clearStallIndicator()
-    node = document.createElement('h2'); node.textContent = ev.text
-  } else if (ev.type === 'h3') {
-    clearStallIndicator()
-    node = document.createElement('h3'); node.textContent = ev.text
-  } else if (ev.type === 'p') {
-    clearStallIndicator()
-    node = document.createElement('p')
-    if (ev.speaker) {
-      const sp = document.createElement('span'); sp.className = 'sp'
-      sp.textContent = ev.speaker + '：'
-      node.appendChild(sp)
-    }
-    node.appendChild(document.createTextNode(ev.text ?? ''))
-    const caret = document.createElement('span'); caret.className = 'caret'; caret.id = 'liveCaret'
-    node.appendChild(caret)
-  } else {
-    return
-  }
-  node.classList.add('fade-node')
-  body.appendChild(node)
-  registerRailHeading(node, ev)
-}
-
-function removeCaret() {
-  const c = document.getElementById('liveCaret')
-  if (c) c.remove()
-}
-
 function startRenderTick() {
   if (state.renderTickHandle) return
   state.renderTickHandle = setInterval(() => {
@@ -393,6 +364,7 @@ function resetRun() {
   state.articleEnded = false
   state.revealDone = false
   state.renderQueue = []
+  resetArticleRenderer()
   stopRenderTick()
   state.aborter = null
   $('hintErr').textContent = ''

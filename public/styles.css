@@ -263,7 +263,16 @@ html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--
   margin:18px 0 8px; letter-spacing:2px;
   font-family:'JetBrains Mono', monospace; text-transform:uppercase; }
 .article p { font-size:16px; line-height:1.9; margin:0 0 14px; }
-.article p .sp { font-weight:700; color:var(--fg); margin-right:6px; }
+.speaker-turn { display:grid; grid-template-columns:76px minmax(0,1fr);
+  column-gap:18px; margin:10px 0 18px; }
+.turn-speaker { padding-top:7px; color:var(--accent);
+  font:600 12px/1.4 'JetBrains Mono', monospace; letter-spacing:.4px; }
+.turn-body { min-width:0; padding-left:18px; border-left:1px solid var(--border); }
+.turn-body p { margin:0 0 10px; }
+.turn-body p:last-child { margin-bottom:0; }
+.turn-question .turn-speaker { color:var(--warn); }
+.turn-question .turn-body { border-left-color:var(--warn-border); }
+.body-para { margin:0 0 14px; }
 .fade-node { opacity:0; filter:blur(3px); transform:translateY(6px);
   animation:nodein 1.1s cubic-bezier(.22,1,.36,1) forwards; }
 @keyframes nodein { to { opacity:1; filter:blur(0); transform:none; } }
