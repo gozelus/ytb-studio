@@ -1,3 +1,10 @@
+/**
+ * [WHAT] Shared TypeScript types for the entire worker: modes, caption data, stream events, error codes.
+ * [WHY]  Single source of truth imported by all modules; keeps circular-dependency risk at zero.
+ * [INVARIANT] The StreamEvent union is exhaustive — adding a new event type here requires updating
+ *             the parser's VALID_TYPES set and the frontend renderer simultaneously.
+ */
+
 export type Mode = 'rewrite' | 'faithful'
 
 export type CaptionKind = 'manual' | 'auto'
