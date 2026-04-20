@@ -60,10 +60,10 @@ function validateUrl(raw) {
   try {
     const u = new URL(raw.trim())
     const host = u.hostname.replace(/^www\.|^m\./, '')
-    if (host === 'youtu.be') return u.pathname.length >= 12
+    if (host === 'youtu.be') return /^\/[a-zA-Z0-9_-]{11}$/.test(u.pathname)
     if (host === 'youtube.com') {
       if (u.pathname === '/watch' && u.searchParams.get('v')) return true
-      return /^\/(embed|shorts)\/[a-zA-Z0-9_-]{11}/.test(u.pathname)
+      return /^\/(embed|shorts)\/[a-zA-Z0-9_-]{11}(?:[?/]|$)/.test(u.pathname)
     }
     return false
   } catch { return false }
@@ -219,7 +219,7 @@ async function consumeSse(body) {
   } catch (err) {
     if (state.cancelled) return
     if (!gotMeta) throw err
-    showInterrupt('GEMINI_STREAM_DROP', String(err))
+    showInterrupt('GEMINI_STREAM_DROP')
     return
   }
 
