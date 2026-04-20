@@ -1,3 +1,11 @@
+/**
+ * [WHAT] Cloudflare Worker entry point: routes /api/inspect and /api/generate;
+ *        serves static assets via the ASSETS binding for everything else.
+ * [WHY]  Single Worker file keeps deployment simple (no separate Pages Functions project).
+ * [INVARIANT] /api/generate always responds HTTP 200 immediately, then streams SSE events.
+ *             Errors mid-stream are delivered as {"type":"error"} events, not HTTP status codes.
+ */
+
 import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
 import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from './gemini'
 import { buildPrompt, PROMPT_VERSION } from './prompt'
@@ -49,6 +57,8 @@ async function inspect(request: Request, env: Env): Promise<Response> {
         const tokens = await countTokens(env, transcript, request.signal)
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens }
       } catch (err) {
+        // Auth failures are fatal for all tracks — re-throw so the outer catch returns 502.
+        // All other errors degrade gracefully: return tokens:0 so the track is still listed.
         if (err instanceof GeminiError && err.code === 'GEMINI_AUTH') throw err
         const code = err instanceof GeminiError ? err.code : 'INTERNAL'
         logError({ reqId, route: '/api/inspect', phase: 'inspect.track.error', trackId: t.id, code, err: String(err) })
@@ -103,6 +113,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
 
   const prompt = buildPrompt(mode, { videoId, title, channel, durationSec }, transcript)
 
+  // 15 s keepalive interval is half of CF's 30 s idle stream timeout.
   const ka = keepaliveTransform(15_000)
   const writer = ka.writable.getWriter()
   const enc = new TextEncoder()
@@ -114,9 +125,11 @@ async function generate(request: Request, env: Env): Promise<Response> {
     let events = 0
     try {
       await writeEvent({ type: 'meta', reqId, title, subtitle: channel, durationSec })
+      // Gemini's ndjson output includes its own meta and end events; suppress them here and
+      // emit our own so the client sees exactly one meta (first, with reqId) and one end (last).
       const parser = createNdjsonParser(e => {
         if (e.type === 'meta') return
-        if (e.type === 'end') return   // route appends its own end event
+        if (e.type === 'end') return
         writeEvent(e)
         events++
       })

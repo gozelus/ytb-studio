@@ -1,3 +1,10 @@
+/**
+ * [WHAT] Streaming ndjson parser: turns incremental Gemini text chunks into typed StreamEvents.
+ * [WHY]  Gemini yields raw text bytes; line buffering and type validation belong here, not in the route.
+ * [INVARIANT] Invalid lines (non-object, bad JSON, unknown type) are silently dropped with a capped
+ *             warning (max 5, then suppressed). Callers must not assume every input byte becomes an event.
+ */
+
 import type { StreamEvent } from './types'
 
 export interface NdjsonParser {
@@ -7,6 +14,10 @@ export interface NdjsonParser {
 
 const VALID_TYPES = new Set(['meta', 'h2', 'h3', 'p', 'end', 'error'])
 
+/**
+ * Creates a stateful parser. Call feed() with each incoming text chunk; call end() when the
+ * stream closes to flush any unterminated final line. onWarn defaults to console.warn.
+ */
 export function createNdjsonParser(
   onEvent: (e: StreamEvent) => void,
   onWarn: (msg: string, line: string) => void = (m, l) => console.warn(m, l),

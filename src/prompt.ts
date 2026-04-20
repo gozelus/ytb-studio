@@ -1,5 +1,13 @@
+/**
+ * [WHAT] Builds the Gemini prompt for the two article-generation modes (rewrite / faithful).
+ * [WHY]  Isolated so prompt text can be versioned, diffed, and tested without touching I/O code.
+ * [INVARIANT] PROMPT_VERSION must be bumped whenever CONTRACT or mode rules change — it is
+ *             logged on every generate request so regressions can be correlated to prompt edits.
+ */
+
 import type { Mode, VideoMeta } from './types'
 
+/** Bump when CONTRACT or mode rules change; logged per-request for regression tracing. */
 export const PROMPT_VERSION = 'v1'
 
 const CONTRACT = `
@@ -72,6 +80,7 @@ const FEW_SHOT = [
   FEW_SHOT_TOPIC_SHIFT,
 ].join('\n\n')
 
+/** Assembles the full Gemini prompt: CONTRACT + mode rules + speaker rules + few-shot + meta + transcript. */
 export function buildPrompt(mode: Mode, meta: VideoMeta, transcript: string): string {
   const rules = mode === 'rewrite' ? REWRITE_RULES : FAITHFUL_RULES
   return [

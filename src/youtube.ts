@@ -1,3 +1,12 @@
+/**
+ * [WHAT] YouTube data layer: video-ID parsing, watch-page scraping, InnerTube fallback,
+ *        caption track listing, and timed-text XML → plain-text conversion.
+ * [WHY]  All YouTube I/O is isolated here so the rest of the worker never touches raw HTML or XML.
+ * [INVARIANT] fetchVideoInfo tries the watch page first, then falls back to InnerTube.
+ *             The fallback fires on any transport/blocking error (429/403/5xx), but VIDEO_NOT_FOUND
+ *             is always re-thrown — a missing video should never silently fall through to InnerTube.
+ */
+
 import type { CaptionTrack } from './types'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/
@@ -24,12 +33,14 @@ interface PlayerResponse {
 
 const PR_REGEX = /var ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var|<\/script>)/s
 
+/** Pulls ytInitialPlayerResponse JSON out of a raw watch-page HTML string; returns null if absent. */
 export function extractPlayerResponse(html: string): PlayerResponse | null {
   const m = html.match(PR_REGEX)
   if (!m) return null
   try { return JSON.parse(m[1]!) as PlayerResponse } catch { return null }
 }
 
+/** Maps raw caption track entries from a PlayerResponse to typed CaptionTrack objects. */
 export function parseCaptionTracks(pr: PlayerResponse): CaptionTrack[] {
   const raw = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []
   return raw.map((t): CaptionTrack => {
@@ -58,12 +69,17 @@ function playerResponseToInfo(pr: PlayerResponse) {
   }
 }
 
+/** Convenience: extractPlayerResponse + playerResponseToInfo in one call; returns null if no PR found. */
 export function extractVideoInfo(html: string) {
   const pr = extractPlayerResponse(html)
   if (!pr) return null
   return playerResponseToInfo(pr)
 }
 
+/**
+ * Fetches video metadata and caption track list.
+ * Tries the watch page first; falls back to InnerTube if the watch page is blocked.
+ */
 export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
   // Track 1: watch page
   try {
@@ -72,8 +88,9 @@ export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
     if (info) return info
     // 200 but no playerResponse (consent gate, etc.) — fall through to InnerTube
   } catch (err) {
+    // Re-throw only VIDEO_NOT_FOUND — the video is genuinely absent, InnerTube will agree.
+    // Swallow YOUTUBE_BLOCKED (429/403/5xx) so Track 2 can attempt an unblocked path.
     if (err instanceof YoutubeError && err.code === 'VIDEO_NOT_FOUND') throw err
-    // YOUTUBE_BLOCKED (429/403/5xx) — fall through to InnerTube
   }
 
   // Track 2: InnerTube Android endpoint (not IP-blocked on CF edges)
@@ -87,6 +104,7 @@ const TEXT_RE = /<text[^>]*>([\s\S]*?)<\/text>/g
 
 function decodeEntities(s: string): string {
   return s
+    // YouTube timed-text double-encodes numeric refs (e.g. &amp;#39; instead of &#39;) — handle both.
     .replace(/&amp;#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&quot;/g, '"')
@@ -96,6 +114,11 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, '&')
 }
 
+/**
+ * Converts YouTube timed-text XML to plain text.
+ * Lines are merged into paragraph-sized chunks: a new paragraph starts after any line
+ * that ends with a sentence-boundary character (.!?;。！？).
+ */
 export function timedTextToTranscript(xml: string): string {
   if (!xml.includes('<text')) return ''
   const lines: string[] = []
@@ -123,6 +146,10 @@ export class YoutubeError extends Error {
   }
 }
 
+/**
+ * Fetches the YouTube watch page with a full Chrome 131 browser fingerprint.
+ * The realistic UA and sec-ch-ua headers reduce (but don't eliminate) 429 rate-limiting on CF edge IPs.
+ */
 export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: {
@@ -148,6 +175,11 @@ export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Pro
   return await res.text()
 }
 
+/**
+ * Fetches the player response via the InnerTube Android API.
+ * Cloudflare edge IPs are far less likely to be rate-limited by this endpoint than by the watch page,
+ * because the Android client fingerprint is treated differently from browser traffic by YouTube's edge.
+ */
 export async function fetchPlayerResponseViaInnertube(videoId: string, signal?: AbortSignal): Promise<PlayerResponse | null> {
   const res = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
@@ -175,12 +207,17 @@ export async function fetchPlayerResponseViaInnertube(videoId: string, signal?: 
   return await res.json() as PlayerResponse
 }
 
+/** Fetches raw timed-text XML from a caption track's baseUrl. */
 export async function fetchTimedText(baseUrl: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(baseUrl, { signal })
   if (!res.ok) throw new YoutubeError('YOUTUBE_BLOCKED')
   return await res.text()
 }
 
+/**
+ * Extracts the 11-char video ID from any supported YouTube URL form
+ * (watch, youtu.be, embed, shorts, m.youtube). Returns null for non-YouTube or malformed input.
+ */
 export function parseVideoId(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null
   let u: URL
