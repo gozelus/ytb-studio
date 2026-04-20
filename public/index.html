@@ -284,6 +284,25 @@
     .interrupt .btn-ghost { background:transparent; color:var(--subtle);
       border:1px solid var(--border); }
     #railReq.copied { color:var(--accent); }
+
+    /* Stall indicator */
+    .stall-indicator { display:flex; align-items:center; gap:8px;
+      margin-top:8px; padding:6px 0 4px;
+      font-size:12px; font-family:'JetBrains Mono', monospace;
+      color:var(--subtle); }
+    .stall-indicator[hidden] { display:none; }
+    .stall-indicator.stall-warm { color:var(--warn); }
+    .stall-indicator.stall-critical {
+      flex-direction:column; align-items:flex-start; gap:6px; }
+    .stall-pulse { flex-shrink:0; width:6px; height:6px; border-radius:50%;
+      background:currentColor; animation:stall-blink 1.4s ease-in-out infinite; }
+    @keyframes stall-blink { 0%,100% { opacity:.25; } 50% { opacity:1; } }
+    .stall-actions { display:flex; gap:8px; }
+    .stall-actions .btn { font-size:11px; padding:5px 12px;
+      border-radius:4px; cursor:pointer; }
+    .stall-actions .btn-primary { background:var(--accent); color:var(--bg); border:none; }
+    .stall-actions .btn-ghost { background:transparent; color:var(--subtle);
+      border:1px solid var(--border); }
     .fallback-banner {
       background:color-mix(in srgb,var(--warn) 12%,var(--bg));
       border:1px solid var(--warn-border);
@@ -389,6 +408,7 @@
         <h1 id="articleH1"></h1>
         <div class="meta" id="articleMeta"></div>
         <div id="articleBody"></div>
+        <div id="stallIndicator" class="stall-indicator" hidden></div>
       </div>
     </div>
   </main>

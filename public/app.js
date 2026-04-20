@@ -275,13 +275,20 @@ function enterArticle(metaEv) {
 function renderEvent(ev) {
   // textContent / createTextNode throughout — never innerHTML on LLM output (XSS prevention)
   const body = $('articleBody')
+  if (ev.type === 'heartbeat') {
+    updateStallIndicator(ev.idleSeconds ?? 0)
+    return
+  }
   removeCaret()
   let node
   if (ev.type === 'h2') {
+    clearStallIndicator()
     node = document.createElement('h2'); node.textContent = ev.text
   } else if (ev.type === 'h3') {
+    clearStallIndicator()
     node = document.createElement('h3'); node.textContent = ev.text
   } else if (ev.type === 'p') {
+    clearStallIndicator()
     node = document.createElement('p')
     if (ev.speaker) {
       const sp = document.createElement('span'); sp.className = 'sp'
@@ -293,6 +300,7 @@ function renderEvent(ev) {
     node.appendChild(caret)
   } else if (ev.type === 'end') {
     removeCaret()
+    clearStallIndicator()
     setStatus('完成')
     state.articleEnded = true
     return
@@ -310,6 +318,51 @@ function renderEvent(ev) {
 function removeCaret() {
   const c = document.getElementById('liveCaret')
   if (c) c.remove()
+}
+
+// ---------- Stall indicator ----------
+function clearStallIndicator() {
+  const el = $('stallIndicator')
+  el.hidden = true
+  el.className = 'stall-indicator'
+  el.textContent = ''
+}
+
+function updateStallIndicator(s) {
+  const el = $('stallIndicator')
+  if (s < 20) { el.hidden = true; return }
+  el.hidden = false
+  el.textContent = ''
+  const pulse = document.createElement('span'); pulse.className = 'stall-pulse'
+  if (s >= 90) {
+    el.className = 'stall-indicator stall-warm stall-critical'
+    const row = document.createElement('div')
+    row.style.cssText = 'display:flex;align-items:center;gap:8px'
+    const txt = document.createElement('span')
+    txt.textContent = `⚠ Gemini 已静默 ${s}s，可能生成堵塞`
+    row.append(pulse, txt)
+    const actions = document.createElement('div'); actions.className = 'stall-actions'
+    const keepBtn = document.createElement('button')
+    keepBtn.className = 'btn btn-ghost'; keepBtn.textContent = '继续等待'
+    keepBtn.addEventListener('click', clearStallIndicator)
+    const abortBtn = document.createElement('button')
+    abortBtn.className = 'btn btn-primary'; abortBtn.textContent = '中止并保留片段'
+    abortBtn.addEventListener('click', () => {
+      state.cancelled = true
+      if (state.aborter) state.aborter.abort()
+      clearStallIndicator()
+      setStatus('⚠ 已中断', true)
+    })
+    actions.append(keepBtn, abortBtn)
+    el.append(row, actions)
+  } else {
+    el.className = 'stall-indicator' + (s >= 45 ? ' stall-warm' : '')
+    const txt = document.createElement('span')
+    txt.textContent = s >= 45
+      ? `Gemini 仍在处理（视频较长，请再等等） · ${s}s`
+      : `Gemini 正在思考 · ${s}s`
+    el.append(pulse, txt)
+  }
 }
 
 // ---------- Step controls ----------
@@ -363,6 +416,7 @@ function resetRun() {
   state.aborter = null
   $('hintErr').textContent = ''
   $('articleBody').innerHTML = ''
+  clearStallIndicator()
   $('m1').textContent = ''; $('m2').textContent = ''
   $('m3').textContent = ''; $('m4').textContent = ''
   byAll('.step-row').forEach(r => { r.classList.remove('active', 'done', 'err'); r.classList.add('pending') })
