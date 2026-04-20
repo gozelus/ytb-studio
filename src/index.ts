@@ -116,6 +116,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
       await writeEvent({ type: 'meta', reqId, title, subtitle: channel, durationSec })
       const parser = createNdjsonParser(e => {
         if (e.type === 'meta') return
+        if (e.type === 'end') return   // route appends its own end event
         writeEvent(e)
         events++
       })
