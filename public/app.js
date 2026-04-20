@@ -11,6 +11,7 @@
 // ---------- State ----------
 const state = {
   mode: 'rewrite',
+  reqId: null,
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
   articleEnded: false,
@@ -114,7 +115,8 @@ async function runInspect(url) {
     body: JSON.stringify({ url }),
   })
   const data = await res.json()
-  $('railReq').textContent = `req · ${data.reqId ?? '—'}`
+  state.reqId = data.reqId ?? null
+  renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
 
   $('m1').textContent = `${fmtDur(data.durationSec)} · ${data.channel}`
@@ -328,6 +330,8 @@ function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知
 function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
+  state.reqId = null
+  renderRailReq()
   state.articleEnded = false
   state.aborter = null
   $('hintErr').textContent = ''
@@ -358,6 +362,15 @@ function ensureInlineActions(container, buttons) {
     actions.appendChild(btn)
   }
   box.append(label, msg, actions)
+  if (state.reqId) {
+    const reqLine = document.createElement('div')
+    reqLine.className = 'interrupt-req'
+    reqLine.textContent = `req · ${state.reqId}`
+    reqLine.title = '点击复制'
+    reqLine.style.cursor = 'pointer'
+    reqLine.addEventListener('click', () => copyReqId(reqLine))
+    box.appendChild(reqLine)
+  }
   container.appendChild(box)
   return box
 }
@@ -435,6 +448,31 @@ function regenerate() {
 function dismissInterrupt() {
   $('articleBody').querySelectorAll('.interrupt').forEach(n => n.remove())
   setStatus('已保留片段')
+}
+
+// ---------- Rail req display ----------
+function renderRailReq() {
+  const el = $('railReq')
+  if (!state.reqId) { el.textContent = '—'; el.onclick = null; el.style.cursor = ''; return }
+  el.textContent = `req · ${state.reqId}`
+  el.title = '点击复制 reqId'
+  el.style.cursor = 'pointer'
+  el.onclick = () => copyReqId(el)
+}
+
+async function copyReqId(el) {
+  if (!state.reqId) return
+  const original = el.textContent
+  try {
+    await navigator.clipboard.writeText(state.reqId)
+    el.textContent = '已复制 ✓'
+    el.classList.add('copied')
+    setTimeout(() => { el.textContent = original; el.classList.remove('copied') }, 1200)
+  } catch {
+    // Fallback for old browsers / non-HTTPS: select text so user can copy manually
+    const range = document.createRange(); range.selectNodeContents(el)
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range)
+  }
 }
 
 // ---------- Utils ----------
