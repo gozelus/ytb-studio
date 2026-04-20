@@ -8,6 +8,9 @@
 
 import type { ErrorCode } from './types'
 
+/** A single content part passed to Gemini: plain text or a fileData URI (e.g. a YouTube URL). */
+export type Part = { text: string } | { fileData: { fileUri: string; mimeType: string } }
+
 const API = 'https://generativelanguage.googleapis.com/v1beta'
 
 export class GeminiError extends Error {
@@ -80,10 +83,11 @@ export async function countTokens(
 /**
  * Streams Gemini's response as raw text chunks extracted from SSE frames.
  * Each yielded string is the concatenated text from one SSE event's candidates.
+ * parts can be text-only ([{text}]) or mixed ([{fileData}, {text}]) for video input.
  */
 export async function* streamGenerate(
   env: Env,
-  prompt: string,
+  parts: Part[],
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
   // Check before the fetch so a pre-cancelled signal never starts a billable request.
@@ -93,7 +97,7 @@ export async function* streamGenerate(
     method: 'POST',
     headers: geminiHeaders(env),
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
     }),
     signal,
