@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseVideoId, extractPlayerResponse, parseCaptionTracks } from '../src/youtube'
+import { parseVideoId, extractPlayerResponse, parseCaptionTracks, timedTextToTranscript } from '../src/youtube'
 // @ts-ignore — Vite raw import, bundled at test build time
 import FIXTURE from './fixtures/watch-xRh2sVcNXQ8.html?raw'
 
@@ -50,5 +50,33 @@ describe('watch page parsing', () => {
 
   it('returns empty array when no captions', () => {
     expect(parseCaptionTracks({ videoDetails: {} } as any)).toEqual([])
+  })
+})
+
+describe('timedTextToTranscript', () => {
+  it('strips tags + merges lines into paragraphs', () => {
+    const xml = `<?xml version="1.0"?>
+<transcript>
+<text start="0" dur="2">Hello everyone.</text>
+<text start="2" dur="3">Welcome to the show</text>
+<text start="5" dur="4">where we discuss technology.</text>
+<text start="9" dur="2">New topic starts now.</text>
+</transcript>`
+    const text = timedTextToTranscript(xml)
+    expect(text).toContain('Hello everyone.')
+    expect(text).toContain('Welcome to the show where we discuss technology.')
+    expect(text).not.toContain('<text')
+    expect(text).not.toContain('start=')
+  })
+
+  it('decodes HTML entities', () => {
+    const xml = `<transcript><text>It&amp;#39;s great &quot;awesome&quot;.</text></transcript>`
+    const text = timedTextToTranscript(xml)
+    expect(text).toContain("It's great \"awesome\".")
+  })
+
+  it('returns empty string for malformed input', () => {
+    expect(timedTextToTranscript('')).toBe('')
+    expect(timedTextToTranscript('not xml')).toBe('')
   })
 })
