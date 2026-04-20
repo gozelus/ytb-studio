@@ -92,3 +92,18 @@ export function buildPrompt(mode: Mode, meta: VideoMeta, transcript: string): st
     `\n[TRANSCRIPT]\n${transcript}`,
   ].join('\n\n')
 }
+
+/**
+ * Prompt for the Gemini-direct (fileData) path where Gemini fetches the video itself.
+ * No [VIDEO META] or [TRANSCRIPT] sections — Gemini extracts them from the attached fileData.
+ */
+export function buildPromptForVideo(mode: Mode): string {
+  const rules = mode === 'rewrite' ? REWRITE_RULES : FAITHFUL_RULES
+  return [
+    CONTRACT,
+    rules,
+    SPEAKER_RULES,
+    FEW_SHOT,
+    '\n[VIDEO] 附件中是一段 YouTube 视频。请基于视频的字幕（优先）或音轨产出文章，遵守上述事件 schema 与模式规则。',
+  ].join('\n\n')
+}
