@@ -88,14 +88,14 @@ describe('countPromptTokens', () => {
     expect(attempt).toBe(3)
   })
 
-  it('throws GEMINI_QUOTA immediately on 429 RESOURCE_EXHAUSTED (no retry)', async () => {
+  it('throws LLM_QUOTA immediately on 429 RESOURCE_EXHAUSTED (no retry)', async () => {
     let attempt = 0
     mockFetch(() => {
       attempt++
       return new Response('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}', { status: 429 })
     })
     await expect(countPromptTokens(googleCfg, 'x', undefined, { sleepFn: async () => {} }))
-      .rejects.toMatchObject({ code: 'GEMINI_QUOTA' })
+      .rejects.toMatchObject({ code: 'LLM_QUOTA' })
     expect(attempt).toBe(1)  // no retry on quota exhaustion
   })
 })
@@ -108,13 +108,13 @@ describe('streamChat (google) — Gemini error codes', () => {
   beforeEach(() => vi.unstubAllGlobals())
   afterEach(() => vi.unstubAllGlobals())
 
-  it('throws GEMINI_SAFETY on 400 with SAFETY in body', async () => {
+  it('throws LLM_SAFETY on 400 with SAFETY in body', async () => {
     mockFetch(() => new Response(
       '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"The model response was blocked due to SAFETY"}}',
       { status: 400 }
     ))
     const gen = streamChat(cfg, 'p')
-    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_SAFETY' })
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_SAFETY' })
   })
 
   it('throws LLM_AUTH on 400 with "API key not valid"', async () => {
@@ -135,13 +135,13 @@ describe('streamChat (google) — Gemini error codes', () => {
     await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_AUTH' })
   })
 
-  it('throws GEMINI_VIDEO_UNSUPPORTED on 400 without SAFETY (e.g. private video)', async () => {
+  it('throws LLM_VIDEO_UNSUPPORTED on 400 for video/fileData errors', async () => {
     mockFetch(() => new Response(
-      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"File does not exist"}}',
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"INVALID_ARGUMENT: fileData video cannot be processed"}}',
       { status: 400 }
     ))
     const gen = streamChat(cfg, 'p')
-    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_VIDEO_UNSUPPORTED' })
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_VIDEO_UNSUPPORTED' })
   })
 
   it('does NOT classify 400 as Gemini-specific for openai provider', async () => {
