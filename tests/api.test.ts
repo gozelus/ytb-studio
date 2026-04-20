@@ -115,7 +115,7 @@ describe('/api/generate', () => {
     expect(capturedBodies[0].generationConfig.mediaResolution).toBe('MEDIA_RESOLUTION_LOW')
     expect(capturedBodies[1].contents[0].parts[0]).toMatchObject({
       fileData: { fileUri: 'https://www.youtube.com/watch?v=xRh2sVcNXQ8', mimeType: 'video/*' },
-      videoMetadata: { startOffset: '0s', endOffset: '300s', fps: 0.25 },
+      videoMetadata: { startOffset: '0s', endOffset: '180s', fps: 0.25 },
     })
     expect(capturedBodies[1].contents[0].parts[1].text).toContain('[LONG VIDEO SEGMENT]')
   })

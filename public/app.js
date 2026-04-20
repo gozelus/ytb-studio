@@ -102,6 +102,8 @@ async function start() {
   const hintErr = $('hintErr')
   if (!validateUrl(url)) { hintErr.textContent = '这不像是 YouTube 链接'; return }
   hintErr.textContent = ''
+  resetRun()
+  state.cancelled = false
   $('url').disabled = true
   $('go').disabled = true
 

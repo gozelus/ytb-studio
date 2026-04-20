@@ -1,18 +1,3 @@
-const QUESTION_SPEAKERS = new Set(['jen', 'john', 'host', 'interviewer', '主持', '提问'])
-const SPEAKER_ALIASES = new Map([
-  ['marc', 'mark'],
-  ['marc andreessen', 'mark'],
-  ['mark andreessen', 'mark'],
-])
-const SPEAKER_LABELS = new Map([
-  ['jen', 'Jen'],
-  ['john', 'John'],
-  ['marc', 'Marc'],
-  ['marc andreessen', 'Marc'],
-  ['mark', 'Mark'],
-  ['mark andreessen', 'Mark'],
-])
-
 export function createArticleRenderer({ $, state, registerRailHeading, clearStallIndicator }) {
   let currentTurn = null
 
@@ -58,7 +43,7 @@ export function createArticleRenderer({ $, state, registerRailHeading, clearStal
 
   function createTurn(speaker) {
     const node = document.createElement('section')
-    node.className = `speaker-turn ${isQuestionSpeaker(speaker.key) ? 'turn-question' : 'turn-answer'} fade-node`
+    node.className = 'speaker-turn fade-node'
 
     const label = document.createElement('div')
     label.className = 'turn-speaker'
@@ -88,13 +73,9 @@ export function createArticleRenderer({ $, state, registerRailHeading, clearStal
     if (!display || /^(null|undefined|none|n\/a)$/i.test(display)) return null
     const lower = display.toLowerCase().replace(/\s+/g, ' ')
     return {
-      display: SPEAKER_LABELS.get(lower) ?? display,
-      key: SPEAKER_ALIASES.get(lower) ?? lower,
+      display,
+      key: lower,
     }
-  }
-
-  function isQuestionSpeaker(key) {
-    return QUESTION_SPEAKERS.has(key)
   }
 
   function removeCaret() {

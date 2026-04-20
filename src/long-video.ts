@@ -7,7 +7,7 @@ import type { LlmConfig } from './llm'
 import type { Mode, StreamEvent } from './types'
 
 const SEGMENT_FIRST_BYTE_TIMEOUT_MS = 90_000
-const MIN_SEGMENT_SECONDS = 300
+const MIN_SEGMENT_SECONDS = 60
 
 export async function streamLongVideoSegments(opts: {
   cfg: LlmConfig
@@ -22,14 +22,15 @@ export async function streamLongVideoSegments(opts: {
   const segmentSeconds = clampNumber(Number(opts.env.LONG_VIDEO_SEGMENT_SECONDS), 300, 3600, 900)
   const firstSegmentSeconds = clampNumber(
     Number(opts.env.LONG_VIDEO_FIRST_SEGMENT_SECONDS),
-    120,
+    60,
     segmentSeconds,
-    Math.min(300, segmentSeconds),
+    Math.min(180, segmentSeconds),
   )
   const maxSegments = clampNumber(Number(opts.env.LONG_VIDEO_MAX_SEGMENTS), 1, 24, 16)
   let totalEvents = 0
   let metaSent = false
   let emittedAny = false
+  const seenHeadings = new Set<string>()
 
   const streamRange = async (segmentIndex: number, startSec: number, endSec: number, depth = 0): Promise<number> => {
     const progress = { firstChunk: false, events: 0 }
@@ -50,6 +51,11 @@ export async function streamLongVideoSegments(opts: {
             emittedAny = true
             opts.writeEvent({ ...e, reqId: opts.reqId })
             return true
+          }
+          if (e.type === 'h2' || e.type === 'h3') {
+            const key = normalizeHeading(e)
+            if (seenHeadings.has(key)) return false
+            seenHeadings.add(key)
           }
           emittedAny = true
           opts.writeEvent(e)
@@ -80,6 +86,10 @@ export async function streamLongVideoSegments(opts: {
         const leftEvents = await streamRange(segmentIndex, startSec, midSec, depth + 1)
         const rightEvents = await streamRange(segmentIndex, midSec, endSec, depth + 1)
         return leftEvents + rightEvents
+      }
+      if (err instanceof LlmError && err.code === 'GEMINI_STALL' && progress.events === 0) {
+        log({ reqId: opts.reqId, route: '/api/generate', phase: 'long_video.segment.skip_empty_stall', videoId: opts.videoId, segmentIndex, startSec, endSec, depth })
+        return 0
       }
       if (emittedAny && err instanceof LlmError && err.code === 'GEMINI_VIDEO_UNSUPPORTED' && progress.events === 0) {
         log({ reqId: opts.reqId, route: '/api/generate', phase: 'long_video.segment.end_of_media', videoId: opts.videoId, segmentIndex, startSec, endSec })
@@ -116,4 +126,8 @@ export async function streamLongVideoSegments(opts: {
 function clampNumber(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback
   return Math.min(max, Math.max(min, Math.floor(value)))
+}
+
+function normalizeHeading(e: Extract<StreamEvent, { type: 'h2' | 'h3' }>): string {
+  return `${e.type}:${e.text.trim().replace(/\s+/g, '')}`
 }

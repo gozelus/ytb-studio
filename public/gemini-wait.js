@@ -85,11 +85,12 @@ export function createGeminiWaitUi({ $ }) {
     const log = $('fallbackLog')
     if (!log) return
     const row = document.createElement('div')
-    row.className = 'fallback-row'
+    row.className = `fallback-row fallback-${stage === 'model_fallback' ? 'model' : 'long'}`
     const time = document.createElement('span')
     time.className = 'time'
     time.textContent = fmtWaitElapsed()
     const text = document.createElement('span')
+    text.className = 'event'
     text.textContent = fallbackLogText(stage, ev)
     row.append(time, text)
     log.appendChild(row)

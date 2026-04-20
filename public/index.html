@@ -60,13 +60,15 @@
     <div class="stage view out" id="prepView">
       <div class="prep-col">
         <svg class="sparkle stage-logo" viewBox="-50 -50 100 100"><g class="ai-core"><path class="bar-h" d="M-30 0 C-10 -1 -1 -10 0 -30 C1 -10 10 -1 30 0 C10 1 1 10 0 30 C-1 10 -10 1 -30 0 Z"/></g><g class="ai-orbit"><circle class="dot" cx="0" cy="-42" r="2.5"/><circle class="dot" cx="36.37" cy="21" r="2.5"/><circle class="dot" cx="-36.37" cy="21" r="2.5"/></g></svg>
-        <div>
+        <div class="prep-copy">
           <div class="prep-title" id="prepTitle">正在准备</div>
           <div class="prep-meta" id="prepMeta"></div>
         </div>
-        <div id="geminiTip" class="gemini-tip" hidden></div>
-        <div id="fallbackLog" class="fallback-log" hidden></div>
-        <div id="geminiTimer" class="gemini-timer" hidden></div>
+        <div class="prep-status">
+          <div id="geminiTip" class="gemini-tip" hidden></div>
+          <div id="fallbackLog" class="fallback-log" aria-live="polite" hidden></div>
+          <div id="geminiTimer" class="gemini-timer" hidden></div>
+        </div>
       </div>
     </div>
 

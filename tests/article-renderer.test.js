@@ -135,17 +135,16 @@ afterEach(() => {
 })
 
 describe('article renderer speaker turns', () => {
-  it('groups consecutive Mark and Marc aliases into one speaker turn', () => {
+  it('groups consecutive paragraphs from the same emitted speaker', () => {
     const { body, renderer } = createRendererHarness()
 
-    renderer.renderEventNow({ type: 'p', speaker: 'Mark Andreessen', text: 'First answer.' })
-    renderer.renderEventNow({ type: 'p', speaker: 'Marc', text: 'Second answer.' })
+    renderer.renderEventNow({ type: 'p', speaker: 'Speaker A', text: 'First answer.' })
+    renderer.renderEventNow({ type: 'p', speaker: 'Speaker A', text: 'Second answer.' })
 
     expect(body.children).toHaveLength(1)
     const turn = body.children[0]
     expect(turn.className).toContain('speaker-turn')
-    expect(turn.className).toContain('turn-answer')
-    expect(turn.children[0].textContent).toBe('Mark')
+    expect(turn.children[0].textContent).toBe('Speaker A')
     expect(turn.children[1].children).toHaveLength(2)
     expect(turn.children[1].children[0].textContent).toBe('First answer.')
     expect(turn.children[1].children[1].textContent).toBe('Second answer.')
@@ -154,9 +153,9 @@ describe('article renderer speaker turns', () => {
   it('starts a new turn after a heading and renders null speakers as body copy', () => {
     const { body, renderer, registerRailHeading } = createRendererHarness()
 
-    renderer.renderEventNow({ type: 'p', speaker: 'Mark', text: 'Before heading.' })
+    renderer.renderEventNow({ type: 'p', speaker: 'Speaker A', text: 'Before heading.' })
     renderer.renderEventNow({ type: 'h3', text: 'A section' })
-    renderer.renderEventNow({ type: 'p', speaker: 'Marc', text: 'After heading.' })
+    renderer.renderEventNow({ type: 'p', speaker: 'Speaker A', text: 'After heading.' })
     renderer.renderEventNow({ type: 'p', speaker: 'null', text: 'Plain paragraph.' })
 
     expect(body.children).toHaveLength(4)
@@ -168,12 +167,11 @@ describe('article renderer speaker turns', () => {
     expect(registerRailHeading).toHaveBeenCalledOnce()
   })
 
-  it('marks interviewer turns as questions', () => {
+  it('trims trailing punctuation from emitted speaker labels', () => {
     const { body, renderer } = createRendererHarness()
 
-    renderer.renderEventNow({ type: 'p', speaker: 'Jen:', text: 'What changed?' })
+    renderer.renderEventNow({ type: 'p', speaker: 'Speaker B:', text: 'What changed?' })
 
-    expect(body.children[0].className).toContain('turn-question')
-    expect(body.children[0].children[0].textContent).toBe('Jen')
+    expect(body.children[0].children[0].textContent).toBe('Speaker B')
   })
 })
