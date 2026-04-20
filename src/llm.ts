@@ -192,7 +192,7 @@ async function retryingFetch(
         throw new LlmError('LLM_AUTH', body.slice(0, 200))
       if (/SAFETY|blocked|blockReason/i.test(body))
         throw new LlmError('LLM_SAFETY', body.slice(0, 200))
-      if (/INVALID_ARGUMENT.*fileData|video|cannot be processed/i.test(body))
+      if (/INVALID_ARGUMENT.*fileData|fileData.*video|cannot be processed/i.test(body))
         throw new LlmError('LLM_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
       throw new LlmError('LLM_TIMEOUT', `status 400: ${body.slice(0, 200)}`)
     }

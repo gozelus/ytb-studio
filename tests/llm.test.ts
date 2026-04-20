@@ -135,13 +135,22 @@ describe('streamChat (google) — Gemini error codes', () => {
     await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_AUTH' })
   })
 
-  it('throws LLM_VIDEO_UNSUPPORTED on 400 for video/fileData errors', async () => {
+  it('throws LLM_VIDEO_UNSUPPORTED on 400 for fileData video errors', async () => {
     mockFetch(() => new Response(
-      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"INVALID_ARGUMENT: fileData video cannot be processed"}}',
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"INVALID_ARGUMENT: fileData: video cannot be processed"}}',
       { status: 400 }
     ))
     const gen = streamChat(cfg, 'p')
     await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_VIDEO_UNSUPPORTED' })
+  })
+
+  it('falls through to LLM_TIMEOUT for generic 400 (not fileData/safety/auth)', async () => {
+    mockFetch(() => new Response(
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"video ID is invalid"}}',
+      { status: 400 }
+    ))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_TIMEOUT' })
   })
 
   it('does NOT classify 400 as Gemini-specific for openai provider', async () => {
