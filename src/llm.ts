@@ -116,6 +116,8 @@ async function retryingFetch(
   const { retries429 = 2, retries5xx = 1, sleepFn = sleep, signal } = opts
   let attempt429 = 0
   let attempt5xx = 0
+  let attempt503 = 0
+  const retries503 = 3
   let delay = 1000
   while (true) {
     const res = await fetch(url, init)
@@ -132,6 +134,17 @@ async function retryingFetch(
         delay *= 3; attempt429++; continue
       }
       throw new LlmError('GEMINI_RATE_LIMIT')
+    }
+    // 503 UNAVAILABLE: demand spike, typically resolves within 30 s — worth retrying 3×.
+    if (res.status === 503) {
+      const body503 = await res.text().catch(() => '')
+      if (attempt503 < retries503) {
+        const backoff = [1000, 3000, 6000][attempt503] ?? 6000
+        await sleepFn(backoff)
+        if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted during retry')
+        attempt503++; continue
+      }
+      throw new LlmError('GEMINI_OVERLOADED', body503.slice(0, 200))
     }
     if (res.status >= 500 && attempt5xx < retries5xx) {
       await sleepFn(1000)

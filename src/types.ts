@@ -39,6 +39,7 @@ export type ErrorCode =
   | 'NO_CAPTIONS'
   | 'YOUTUBE_BLOCKED'
   | 'GEMINI_AUTH'
+  | 'GEMINI_OVERLOADED'
   | 'GEMINI_RATE_LIMIT'
   | 'GEMINI_QUOTA'
   | 'GEMINI_TIMEOUT'

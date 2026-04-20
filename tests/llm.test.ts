@@ -69,6 +69,28 @@ describe('countPromptTokens', () => {
     expect(attempt).toBe(3)
   })
 
+  it('retries 503 up to 3 times then throws GEMINI_OVERLOADED', async () => {
+    let attempt = 0
+    mockFetch(() => {
+      attempt++
+      return new Response('This model is currently experiencing high demand.', { status: 503 })
+    })
+    await expect(countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} }))
+      .rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
+    expect(attempt).toBe(4) // 1 initial + 3 retries
+  })
+
+  it('succeeds if 503 clears before retries exhausted', async () => {
+    let attempt = 0
+    mockFetch(() => {
+      attempt++
+      if (attempt <= 2) return new Response('overloaded', { status: 503 })
+      return new Response(JSON.stringify({ totalTokens: 5 }), { status: 200 })
+    })
+    expect(await countPromptTokens(cfg, 'x', undefined, { sleepFn: async () => {} })).toBe(5)
+    expect(attempt).toBe(3)
+  })
+
   it('throws GEMINI_QUOTA immediately on 429 RESOURCE_EXHAUSTED (no retry)', async () => {
     let attempt = 0
     mockFetch(() => {
