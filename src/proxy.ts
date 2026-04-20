@@ -8,6 +8,7 @@
  */
 
 import { connect } from 'cloudflare:sockets'
+import { log } from './log'
 
 export interface ProxyConfig {
   urls: string[]
@@ -52,6 +53,16 @@ export async function fetchViaSocks5(
   throw lastErr ?? new Error('PROXY: all endpoints failed')
 }
 
+/** Races a Promise against a timeout; rejects with a descriptive error on expiry. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error(`SOCKS5 timeout: ${label} after ${ms}ms`)), ms)
+    ),
+  ])
+}
+
 async function socks5Fetch(
   target: URL,
   proxyUrl: string,
@@ -60,13 +71,15 @@ async function socks5Fetch(
 ): Promise<Response> {
   const proxy = new URL(proxyUrl)
   const targetPort = target.port ? Number(target.port) : (target.protocol === 'https:' ? 443 : 80)
+  const proxyPort = Number(proxy.port) || 1080
   const user = decodeURIComponent(proxy.username)
   const pass = decodeURIComponent(proxy.password)
 
   const socket = connectFn(
-    { hostname: proxy.hostname, port: Number(proxy.port) || 1080 },
+    { hostname: proxy.hostname, port: proxyPort },
     { allowHalfOpen: true },
   )
+  log({ phase: 'proxy.tcp.connected', host: `${proxy.hostname}:${proxyPort}` })
 
   try {
     await socks5Handshake(socket, target.hostname, targetPort, user, pass)
@@ -74,6 +87,7 @@ async function socks5Fetch(
     // After CONNECT succeeds, upgrade the tunnel to TLS.
     // The proxy forwards TLS ClientHello to the target, so startTls operates end-to-end.
     const tls = socket.startTls({ expectedServerHostname: target.hostname })
+    log({ phase: 'proxy.tls.started', sni: target.hostname })
 
     // Build HTTP/1.1 request. Omit Accept-Encoding to get plain-text (not gzip),
     // avoiding decompression in the manual response parser below.
@@ -103,7 +117,14 @@ async function socks5Fetch(
   }
 }
 
-/** RFC 1928 + RFC 1929 SOCKS5 handshake: greeting → username/password auth → CONNECT. */
+/**
+ * RFC 1928 + RFC 1929 SOCKS5 handshake: greeting → username/password auth → CONNECT.
+ *
+ * Uses a carry-over buffer so that if a single reader.read() returns more bytes than
+ * a given readExact() call needs, the excess bytes are preserved for the next call
+ * instead of being dropped. Real proxies often coalesce small responses (e.g. greeting
+ * response + auth response) into a single TCP segment.
+ */
 async function socks5Handshake(
   socket: Socket,
   hostname: string,
@@ -112,69 +133,80 @@ async function socks5Handshake(
   pass: string,
 ): Promise<void> {
   const writer = socket.writable.getWriter()
-  const reader = socket.readable.getReader() as ReadableStreamDefaultReader<Uint8Array>
+  const rawReader = socket.readable.getReader() as ReadableStreamDefaultReader<Uint8Array>
   const enc = new TextEncoder()
+  const STEP_MS = 4000
+
+  // Carry-over: bytes received from the stream but not yet consumed by readExact.
+  let carry = new Uint8Array(0)
+
+  async function readExact(n: number): Promise<Uint8Array> {
+    const out = new Uint8Array(n)
+    let filled = 0
+    if (carry.length > 0) {
+      const take = Math.min(carry.length, n)
+      out.set(carry.subarray(0, take))
+      filled = take
+      carry = carry.subarray(take)
+    }
+    while (filled < n) {
+      const { value, done } = await withTimeout(rawReader.read(), STEP_MS, `read@${filled}/${n}`)
+      if (done || !value) throw new Error(`SOCKS5: stream closed at ${filled}/${n}`)
+      const need = n - filled
+      const take = Math.min(value.length, need)
+      out.set(value.subarray(0, take), filled)
+      filled += take
+      if (value.length > need) carry = new Uint8Array(value.subarray(need))
+    }
+    return out
+  }
 
   try {
     // Greeting: SOCKS5, 2 auth methods (NO_AUTH=0x00, USERNAME/PASSWORD=0x02)
-    await writer.write(new Uint8Array([0x05, 0x02, 0x00, 0x02]))
-    const choice = await readExact(reader, 2)
+    await withTimeout(writer.write(new Uint8Array([0x05, 0x02, 0x00, 0x02])), STEP_MS, 'greeting.write')
+    log({ phase: 'proxy.greeting.sent' })
+
+    const choice = await readExact(2)
+    log({ phase: 'proxy.greeting.recv', bytes: Array.from(choice) })
     if (choice[0] !== 0x05) throw new Error(`SOCKS5: bad version ${choice[0]}`)
     if (choice[1] !== 0x02) throw new Error(`SOCKS5: unsupported auth method ${choice[1]}`)
 
     // Username/password authentication (RFC 1929)
     const u = enc.encode(user), p = enc.encode(pass)
     const authMsg = new Uint8Array([0x01, u.length, ...u, p.length, ...p])
-    await writer.write(authMsg)
-    const authResp = await readExact(reader, 2)
+    await withTimeout(writer.write(authMsg), STEP_MS, 'auth.write')
+    log({ phase: 'proxy.auth.sent' })
+
+    const authResp = await readExact(2)
+    log({ phase: 'proxy.auth.recv', bytes: Array.from(authResp) })
     if (authResp[1] !== 0x00) throw new Error(`SOCKS5: auth rejected status=${authResp[1]}`)
 
     // CONNECT request with DOMAINNAME address type (0x03) — proxy resolves DNS (socks5h)
     const hostBytes = enc.encode(hostname)
     const connectMsg = new Uint8Array([
-      0x05, 0x01, 0x00, 0x03,     // SOCKS5 CONNECT DOMAINNAME
+      0x05, 0x01, 0x00, 0x03,
       hostBytes.length, ...hostBytes,
       (port >> 8) & 0xff, port & 0xff,
     ])
-    await writer.write(connectMsg)
+    await withTimeout(writer.write(connectMsg), STEP_MS, 'connect.write')
+    log({ phase: 'proxy.connect.sent', hostname, port })
 
     // Response: ver(1) + rep(1) + rsv(1) + atyp(1) = 4 bytes minimum
-    const hdr = await readExact(reader, 4)
+    const hdr = await readExact(4)
+    log({ phase: 'proxy.connect.recv', bytes: Array.from(hdr) })
     if (hdr[1] !== 0x00) throw new Error(`SOCKS5: CONNECT refused rep=${hdr[1]}`)
 
-    // Consume the bound address (we don't use it, but must read it to clear the buffer)
+    // Consume the bound address (we don't use it, but must drain it to keep stream in sync)
     const atyp = hdr[3]!
-    if (atyp === 0x01) await readExact(reader, 6)         // IPv4 (4) + port (2)
+    if (atyp === 0x01) await readExact(6)          // IPv4 (4) + port (2)
     else if (atyp === 0x03) {
-      const lenByte = await readExact(reader, 1)
-      await readExact(reader, (lenByte[0] ?? 0) + 2)       // domain + port
-    } else if (atyp === 0x04) await readExact(reader, 18)  // IPv6 (16) + port (2)
+      const lenByte = await readExact(1)
+      await readExact((lenByte[0] ?? 0) + 2)         // domain + port
+    } else if (atyp === 0x04) await readExact(18)   // IPv6 (16) + port (2)
   } finally {
-    reader.releaseLock()
+    rawReader.releaseLock()
     writer.releaseLock()
   }
-}
-
-/**
- * Reads exactly n bytes from a stream reader. Each chunk read from the underlying
- * stream is consumed immediately; no data is buffered past the requested n bytes.
- * In SOCKS5 the proxy sends each response only after its corresponding request,
- * so no pre-fetching of "TLS-layer" bytes occurs here.
- */
-async function readExact(reader: ReadableStreamDefaultReader<Uint8Array>, n: number): Promise<Uint8Array> {
-  const out = new Uint8Array(n)
-  let filled = 0
-  while (filled < n) {
-    const { value, done } = await reader.read()
-    if (done) throw new Error('SOCKS5: stream closed before reading enough bytes')
-    const need = n - filled
-    const take = Math.min(value.length, need)
-    out.set(value.subarray(0, take), filled)
-    filled += take
-    // If value had extra bytes beyond what we need, they are silently dropped.
-    // In SOCKS5 this does not happen: the proxy never pre-sends TLS data.
-  }
-  return out
 }
 
 /** Reads the entire HTTP/1.1 response from a readable stream and returns a Response object. */

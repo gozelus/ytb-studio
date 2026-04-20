@@ -62,8 +62,8 @@ describe('loadProxyConfig', () => {
 // provides scripted server responses one chunk at a time; the writable captures
 // every byte the client sends. We then assert on the captured bytes.
 //
-// Chunk sizing: each ReadableStream chunk is sized to exactly match a single
-// readExact() call so excess-byte dropping never occurs.
+// The carry-over buffer tests below additionally verify that coalesced chunks
+// and 1-byte chunks are handled correctly without data loss.
 
 /** Server responses for a successful IPv4-bound CONNECT handshake. */
 function socks5ServerChunks(): Uint8Array[] {
@@ -278,5 +278,54 @@ describe('fetchViaSocks5 error handling', () => {
     await expect(
       fetchViaSocks5('https://example.com/', config, {}, { _connect: connectFn })
     ).rejects.toThrow(/CONNECT refused/)
+  })
+})
+
+// ── carry-over buffer (coalesced server chunks) ───────────────────────────────
+//
+// Real proxies may coalesce responses: e.g. greeting + auth in a single TCP segment.
+// readExact must save excess bytes and replay them on the next call, not drop them.
+
+describe('SOCKS5 carry-over buffer', () => {
+  const config = { urls: ['socks5h://alice:s3cr3t@proxy.test:1080'] }
+
+  it('handles greeting + auth response coalesced into one chunk', async () => {
+    // Server sends [05 02] greeting and [01 00] auth in a single read() chunk
+    const coalescedChunks = [
+      new Uint8Array([0x05, 0x02, 0x01, 0x00]), // greeting(2) + auth(2) merged
+      new Uint8Array([0x05, 0x00, 0x00, 0x01]), // CONNECT: success, atyp=IPv4
+      new Uint8Array([127, 0, 0, 1, 0, 80]),    // bound addr
+    ]
+    const { connectFn } = makeMockSocket(coalescedChunks)
+    const res = await fetchViaSocks5(
+      'https://www.youtube.com/watch?v=abc', config, {}, { _connect: connectFn },
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('handles all SOCKS5 responses coalesced into one giant chunk', async () => {
+    // Everything: greeting(2) + auth(2) + connect_hdr(4) + bound_ipv4(6) = 14 bytes
+    const all = new Uint8Array([
+      0x05, 0x02,             // greeting
+      0x01, 0x00,             // auth ok
+      0x05, 0x00, 0x00, 0x01, // CONNECT ok, atyp=IPv4
+      127, 0, 0, 1, 0, 80,    // bound addr
+    ])
+    const { connectFn } = makeMockSocket([all])
+    const res = await fetchViaSocks5(
+      'https://www.youtube.com/watch?v=abc', config, {}, { _connect: connectFn },
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('handles server responses arriving 1 byte at a time', async () => {
+    // Worst case: each byte is a separate chunk
+    const bytes = [0x05, 0x02, 0x01, 0x00, 0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 80]
+    const oneByteChunks = bytes.map(b => new Uint8Array([b]))
+    const { connectFn } = makeMockSocket(oneByteChunks)
+    const res = await fetchViaSocks5(
+      'https://www.youtube.com/watch?v=abc', config, {}, { _connect: connectFn },
+    )
+    expect(res.status).toBe(200)
   })
 })
