@@ -13,12 +13,19 @@ interface Env {
 
 function model(env: Env) { return env.GEMINI_MODEL ?? 'gemini-2.5-flash' }
 
+function geminiHeaders(env: Env): Record<string, string> {
+  return {
+    'content-type': 'application/json',
+    'x-goog-api-key': env.GEMINI_API_KEY,
+  }
+}
+
 async function retryingFetch(
   url: string,
   init: RequestInit,
-  opts: { retries429?: number; retries5xx?: number; sleepFn?: (ms: number) => Promise<void> } = {},
+  opts: { retries429?: number; retries5xx?: number; sleepFn?: (ms: number) => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const { retries429 = 2, retries5xx = 1, sleepFn = sleep } = opts
+  const { retries429 = 2, retries5xx = 1, sleepFn = sleep, signal } = opts
   let attempt429 = 0
   let attempt5xx = 0
   let delay = 1000
@@ -27,10 +34,14 @@ async function retryingFetch(
     if (res.ok) return res
     if (res.status === 401 || res.status === 403) throw new GeminiError('GEMINI_AUTH')
     if (res.status === 429 && attempt429 < retries429) {
-      await sleepFn(delay); delay *= 3; attempt429++; continue
+      await sleepFn(delay)
+      if (signal?.aborted) throw new GeminiError('GEMINI_STREAM_DROP', 'aborted during retry')
+      delay *= 3; attempt429++; continue
     }
     if (res.status >= 500 && attempt5xx < retries5xx) {
-      await sleepFn(1000); attempt5xx++; continue
+      await sleepFn(1000)
+      if (signal?.aborted) throw new GeminiError('GEMINI_STREAM_DROP', 'aborted during retry')
+      attempt5xx++; continue
     }
     if (res.status === 429) throw new GeminiError('GEMINI_RATE_LIMIT')
     throw new GeminiError('GEMINI_TIMEOUT', `status ${res.status}`)
@@ -45,13 +56,13 @@ export async function countTokens(
   signal?: AbortSignal,
   opts: { sleepFn?: (ms: number) => Promise<void> } = {},
 ): Promise<number> {
-  const url = `${API}/models/${model(env)}:countTokens?key=${env.GEMINI_API_KEY}`
+  const url = `${API}/models/${model(env)}:countTokens`
   const res = await retryingFetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: geminiHeaders(env),
     body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
     signal,
-  }, { sleepFn: opts.sleepFn })
+  }, { sleepFn: opts.sleepFn, signal })
   const data = await res.json() as { totalTokens?: number }
   return data.totalTokens ?? 0
 }
@@ -62,16 +73,16 @@ export async function* streamGenerate(
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new GeminiError('GEMINI_STREAM_DROP', 'aborted before start')
-  const url = `${API}/models/${model(env)}:streamGenerateContent?alt=sse&key=${env.GEMINI_API_KEY}`
+  const url = `${API}/models/${model(env)}:streamGenerateContent?alt=sse`
   const res = await retryingFetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: geminiHeaders(env),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
     }),
     signal,
-  }, { retries429: 2, retries5xx: 1 })
+  }, { retries429: 2, retries5xx: 1, signal })
 
   if (!res.body) throw new GeminiError('GEMINI_STREAM_DROP', 'no body')
   const reader = res.body.getReader()
