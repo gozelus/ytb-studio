@@ -38,10 +38,10 @@
     /* Rail */
     .rail { width:260px; background:var(--rail); border-right:1px solid var(--border);
       padding:54px 18px 20px; display:flex; flex-direction:column; gap:14px;
-      transition:width .5s ease, padding .5s ease, transform .6s cubic-bezier(.22,1,.36,1);
-      overflow:hidden; flex-shrink:0; transform:translateX(-100%);
+      transition:width .5s ease, padding .5s ease, margin-left .6s cubic-bezier(.22,1,.36,1);
+      overflow:hidden; flex-shrink:0; margin-left:-260px;
       position:relative; }
-    .rail.in { transform:none; }
+    .rail.in { margin-left:0; }
     .rail.collapsed { width:40px; padding:54px 6px 20px; }
     .rail.collapsed > :not(.rail-toggle) { opacity:0; pointer-events:none; }
     .rail.dimmed { opacity:.38; pointer-events:none; filter:saturate(.4); }
@@ -87,9 +87,12 @@
       align-items:center; justify-content:center; gap:22px; padding:40px;
       transition:opacity .5s, transform .5s; }
     .hero.out { opacity:0; transform:translateY(-12px); pointer-events:none; }
-    .hero .h-title { font-size:32px; font-weight:600; letter-spacing:2px; }
-    .hero .h-sub { font-family:'JetBrains Mono', monospace; font-size:13px;
-      color:var(--subtle); letter-spacing:1px; margin-top:6px; }
+    .hero .h-title {
+      font-size:32px; font-weight:600; letter-spacing:2px;
+      background:linear-gradient(90deg,var(--fg) 0%,var(--fg) 30%,var(--accent) 50%,var(--fg) 70%,var(--fg) 100%);
+      background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+      -webkit-text-fill-color:transparent; color:transparent;
+    }
     .hero .input-wrap { width:560px; max-width:88%; display:flex; gap:10px; }
     .hero input { flex:1; background:transparent; color:var(--fg);
       border:1px solid var(--border); border-radius:8px; padding:14px 16px;
@@ -108,8 +111,8 @@
     .hero .hint-err { color:var(--warn); font-family:'JetBrains Mono', monospace;
       font-size:12px; min-height:16px; margin-top:-10px; }
     @keyframes heroIn { from { opacity:0; transform:translateY(10px); filter:blur(6px); } to { opacity:1; transform:none; filter:none; } }
-    .hero .h-title   { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1)       both; }
-    .hero .h-sub     { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .15s  both; }
+    @keyframes h-shimmer { 0% { background-position:150% 0; } 100% { background-position:-50% 0; } }
+    .hero .h-title   { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) both, h-shimmer 3.5s ease-in-out infinite; }
     .hero .input-wrap{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .3s   both; }
     .hero .mode-inline{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .45s both; }
 
@@ -278,7 +281,6 @@
       <svg class="sparkle hero" id="heroLogo" viewBox="-50 -50 100 100"><g class="spin"><g class="breath"><path class="bar-h" d="M-46 0 C-16 -2 -2 -16 0 -46 C2 -16 16 -2 46 0 C16 2 2 16 0 46 C-2 16 -16 2 -46 0 Z"/><circle class="small" cx="30" cy="30" r="3"/><circle class="small" cx="-30" cy="-30" r="3"/><circle class="small" cx="30" cy="-30" r="2"/><circle class="small" cx="-30" cy="30" r="2"/></g></g></svg>
       <div style="text-align:center;">
         <div class="h-title">ytb-studio</div>
-        <div class="h-sub">把 YouTube 对话，变成一篇可读的中文文章</div>
       </div>
       <div class="input-wrap">
         <input id="url" placeholder="粘贴一个有字幕的 YouTube 链接" autofocus>
