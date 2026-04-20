@@ -12,6 +12,7 @@
 const state = {
   mode: 'rewrite',
   reqId: null,
+  isFallback: false,   // true when inspect couldn't reach YouTube metadata
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
   articleEnded: false,
@@ -116,10 +117,11 @@ async function runInspect(url) {
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
+  state.isFallback = data.fallback ?? false
   renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
 
-  $('m1').textContent = `${fmtDur(data.durationSec)} · ${data.channel}`
+  $('m1').textContent = data.channel ? `${fmtDur(data.durationSec)} · ${data.channel}` : '—'
   doneStep(1); activateStep(2)
   setStatus('解析字幕')
   $('m2').textContent = `发现 ${data.tracks.length} 条`
@@ -132,8 +134,13 @@ async function runInspect(url) {
 function showPicker(data) {
   showView('pickView')
   setStatus('等待选择字幕')
-  $('pickTitle').textContent = data.title
-  $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
+  if (data.fallback || !data.title) {
+    $('pickTitle').textContent = '视频信息暂不可用'
+    $('pickMeta').textContent = '无法从 CF 边缘连接 YouTube 元数据；可继续 AI 直读，标题将在生成时确定'
+  } else {
+    $('pickTitle').textContent = data.title
+    $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
+  }
   const list = $('capList'); list.innerHTML = ''
   const sorted = [...data.tracks].sort((a, b) => (a.kind === 'manual' ? -1 : 1))
   sorted.forEach((t, i) => {
@@ -229,11 +236,16 @@ async function consumeSse(body) {
 
 // ---------- Article ----------
 function enterArticle(metaEv) {
-  $('revealH1').textContent = metaEv.title
-  $('revealSub').textContent = metaEv.subtitle
-  $('articleH1').textContent = metaEv.title
-  $('articleMeta').textContent = metaEv.subtitle + ' · ' + fmtDur(metaEv.durationSec)
-  document.title = metaEv.title
+  const title = metaEv.title || '(未命名)'
+  const metaParts = [metaEv.subtitle, fmtDur(metaEv.durationSec)].filter(Boolean)
+  $('revealH1').textContent = title
+  $('revealSub').textContent = metaEv.subtitle ?? ''
+  $('articleH1').textContent = title
+  $('articleMeta').textContent = metaParts.join(' · ')
+  $('articleDisclaimer').textContent = state.isFallback
+    ? '本次生成走 AI 直读（YouTube 元信息抓取失败），标题由 AI 在生成时给出'
+    : ''
+  document.title = title
   hideAllViews()
   const rv = $('revealView')
   // Reset animation state so replay works (CSS keyframes won't restart if .play already present)
@@ -331,6 +343,7 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null
+  state.isFallback = false
   renderRailReq()
   state.articleEnded = false
   state.aborter = null
@@ -342,6 +355,7 @@ function resetRun() {
   // Reset reveal/article classes so replay works cleanly
   $('revealView').classList.remove('play')
   $('articleView').classList.remove('show')
+  $('articleDisclaimer').textContent = ''
   $('statusPill').classList.remove('err')
   setStatus('idle')
 }
