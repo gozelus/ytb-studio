@@ -267,6 +267,43 @@ describe('streamChat', () => {
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STREAM_DROP' })
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
+
+  it('sends fileData part when called with Part[] containing fileUri', async () => {
+    let capturedBody: unknown
+    mockFetch(async req => {
+      capturedBody = await req.json()
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+        { status: 200 },
+      )
+    })
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, [
+      { fileData: { fileUri: 'https://www.youtube.com/watch?v=abc123' } },
+      { text: 'describe this video' },
+    ])) chunks.push(c)
+
+    expect(chunks.join('')).toBe('ok')
+    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0].parts
+    expect(parts[0]).toMatchObject({ fileData: { fileUri: 'https://www.youtube.com/watch?v=abc123' } })
+    expect(parts[1]).toMatchObject({ text: 'describe this video' })
+  })
+
+  it('sends text-only part when called with a plain string', async () => {
+    let capturedBody: unknown
+    mockFetch(async req => {
+      capturedBody = await req.json()
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+        { status: 200 },
+      )
+    })
+    for await (const _ of streamChat(cfg, 'hello gemini')) { /* drain */ }
+    const parts = (capturedBody as { contents: Array<{ parts: unknown[] }> }).contents[0].parts
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({ text: 'hello gemini' })
+    expect(parts[0]).not.toHaveProperty('fileData')
+  })
 })
 
 // ── keepaliveTransform ────────────────────────────────────────────────────────
