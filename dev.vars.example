@@ -1,0 +1,15 @@
+# Copy this file to .dev.vars and fill in your API key.
+# .dev.vars is gitignored — never commit real keys.
+
+# Option A: OpenRouter (recommended — one key, many models)
+LLM_PROVIDER=openrouter
+LLM_MODEL=google/gemini-2.5-flash
+LLM_API_KEY=your-openrouter-key-here
+
+# Option B: Google Gemini directly
+# LLM_PROVIDER=google
+# LLM_MODEL=gemini-2.5-flash
+# LLM_API_KEY=your-gemini-key-here
+
+# Option C: backward-compat shorthand for Google
+# GEMINI_API_KEY=your-gemini-key-here
