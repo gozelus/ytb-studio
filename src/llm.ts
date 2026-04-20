@@ -18,7 +18,12 @@ export interface LlmConfig {
   apiKey: string
 }
 
-export type Part = { text: string } | { fileData: { fileUri: string; mimeType?: string } }
+export type Part =
+  | { text: string }
+  | {
+      fileData: { fileUri: string; mimeType?: string }
+      videoMetadata?: { startOffset?: string; endOffset?: string; fps?: number }
+    }
 
 interface Env {
   GEMINI_API_KEY?: string
@@ -45,6 +50,10 @@ export async function* streamChat(
   opts: {
     _idleTimeoutMs?: number
     _heartbeatIntervalMs?: number
+    _textIdleTimeoutMs?: number
+    initialResponseTimeoutMs?: number
+    mediaResolution?: 'MEDIA_RESOLUTION_LOW' | 'MEDIA_RESOLUTION_MEDIUM' | 'MEDIA_RESOLUTION_HIGH'
+    noFallbackCodes?: ErrorCode[]
     onHeartbeat?: (idleSeconds: number) => void
   } = {},
 ): AsyncGenerator<string> {
@@ -56,8 +65,9 @@ export async function* streamChat(
     'GEMINI_QUOTA',       // 429 quota exhausted (per-model on free tier)
     'GEMINI_TIMEOUT',     // catch-all transient upstream errors (500/504/unknown 4xx)
     'GEMINI_STREAM_DROP', // network/stream severed before first token
-    'GEMINI_STALL',       // 120s no tokens before first token — next model may respond
+      'GEMINI_STALL',       // 120s no tokens before first token — next model may respond
   ])
+  const noFallbackCodes = new Set(opts.noFallbackCodes ?? [])
 
   for (let i = 0; i < cfg.models.length; i++) {
     const model = cfg.models[i]!
@@ -73,6 +83,7 @@ export async function* streamChat(
       }
       return
     } catch (err) {
+      if (!firstTokenSeen && err instanceof LlmError && noFallbackCodes.has(err.code)) throw err
       if (!firstTokenSeen && err instanceof LlmError && fallbackTriggers.has(err.code) && i < cfg.models.length - 1) {
         log({ phase: 'llm.fallback', from: model, to: cfg.models[i + 1], reason: err.code })
         continue
@@ -125,18 +136,41 @@ async function retryingFetch(
   opts: {
     retries429?: number
     retries5xx?: number
+    requestTimeoutMs?: number
     sleepFn?: (ms: number) => Promise<void>
     signal?: AbortSignal
   } = {},
 ): Promise<Response> {
-  const { retries429 = 2, retries5xx = 1, sleepFn = sleep, signal } = opts
+  const { retries429 = 2, retries5xx = 1, requestTimeoutMs, sleepFn = sleep, signal } = opts
   let attempt429 = 0
   let attempt5xx = 0
   let attempt503 = 0
   const retries503 = 3
   let delay = 1000
   while (true) {
-    const res = await fetch(url, init)
+    let timedOut = false
+    const controller = new AbortController()
+    const abortFromParent = () => controller.abort()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before fetch')
+    signal?.addEventListener('abort', abortFromParent, { once: true })
+    if (requestTimeoutMs && requestTimeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, requestTimeoutMs)
+    }
+    let res: Response
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal })
+    } catch (err) {
+      if (timedOut) throw new LlmError('GEMINI_STALL', `No Gemini response headers in ${Math.round(requestTimeoutMs! / 1000)}s`)
+      if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted during fetch')
+      throw err
+    } finally {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', abortFromParent)
+    }
     if (res.ok) return res
     if (res.status === 401 || res.status === 403) throw new LlmError('GEMINI_AUTH')
     if (res.status === 429) {
@@ -173,6 +207,8 @@ async function retryingFetch(
         throw new LlmError('GEMINI_AUTH', body.slice(0, 200))
       if (/SAFETY|blocked|blockReason/i.test(body))
         throw new LlmError('GEMINI_SAFETY', body.slice(0, 200))
+      if (/input token count exceeds|maximum number of tokens allowed|exceeds the maximum.*tokens/i.test(body))
+        throw new LlmError('GEMINI_CONTEXT_LIMIT', `status 400: ${body.slice(0, 200)}`)
       if (/INVALID_ARGUMENT.*fileData|fileData.*video|cannot be processed/i.test(body))
         throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
       throw new LlmError('GEMINI_TIMEOUT', `status 400: ${body.slice(0, 200)}`)
@@ -198,11 +234,19 @@ async function* consumeSSE(
   idleTimeoutMs = IDLE_TIMEOUT_MS,
   heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
   onHeartbeat?: (idleSeconds: number) => void,
+  textIdleTimeoutMs?: number,
 ): AsyncGenerator<string> {
   if (!res.body) throw new LlmError('GEMINI_STREAM_DROP', 'no body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+  let lastTextAt = Date.now()
+
+  const checkTextIdle = () => {
+    if (textIdleTimeoutMs && Date.now() - lastTextAt >= textIdleTimeoutMs) {
+      throw new LlmError('GEMINI_STALL', `No text from Gemini in ${Math.round(textIdleTimeoutMs / 1000)}s`)
+    }
+  }
 
   // Race readPromise against a short tick; reuse the same Promise until it resolves.
   const readWithHeartbeat = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
@@ -229,10 +273,20 @@ async function* consumeSSE(
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, idx); buf = buf.slice(idx + 2)
         const text = extractFn(frame)
-        if (text) yield text
+        if (text) {
+          lastTextAt = Date.now()
+          yield text
+        } else {
+          checkTextIdle()
+        }
       }
+      checkTextIdle()
     }
-    if (buf.trim()) { const text = extractFn(buf); if (text) yield text }
+    if (buf.trim()) {
+      const text = extractFn(buf)
+      if (text) yield text
+      else checkTextIdle()
+    }
   } finally {
     try { reader.cancel() } catch { /* ignore */ }
   }
@@ -244,19 +298,37 @@ async function* streamGoogle(
   cfg: { model: string; apiKey: string },
   parts: Part[],
   signal?: AbortSignal,
-  opts: { _idleTimeoutMs?: number; _heartbeatIntervalMs?: number; onHeartbeat?: (idleSeconds: number) => void } = {},
+  opts: {
+    _idleTimeoutMs?: number
+    _heartbeatIntervalMs?: number
+    _textIdleTimeoutMs?: number
+    initialResponseTimeoutMs?: number
+    mediaResolution?: 'MEDIA_RESOLUTION_LOW' | 'MEDIA_RESOLUTION_MEDIUM' | 'MEDIA_RESOLUTION_HIGH'
+    noFallbackCodes?: ErrorCode[]
+    onHeartbeat?: (idleSeconds: number) => void
+  } = {},
 ) {
   const base = 'https://generativelanguage.googleapis.com/v1beta'
+  const generationConfig: Record<string, unknown> = { temperature: 0.7, maxOutputTokens: 32768 }
+  if (opts.mediaResolution) generationConfig.mediaResolution = opts.mediaResolution
   const res = await retryingFetch(`${base}/models/${cfg.model}:streamGenerateContent?alt=sse`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
     body: JSON.stringify({
       contents: [{ parts }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
+      generationConfig,
     }),
     signal,
-  }, { retries429: 2, retries5xx: 1, signal })
-  yield* consumeSSE(res, extractGoogleText, signal, opts._idleTimeoutMs, opts._heartbeatIntervalMs, opts.onHeartbeat)
+  }, { retries429: 2, retries5xx: 1, requestTimeoutMs: opts.initialResponseTimeoutMs, signal })
+  yield* consumeSSE(
+    res,
+    extractGoogleText,
+    signal,
+    opts._idleTimeoutMs,
+    opts._heartbeatIntervalMs,
+    opts.onHeartbeat,
+    opts._textIdleTimeoutMs,
+  )
 }
 
 function extractGoogleText(frame: string): string {
@@ -284,6 +356,8 @@ function extractGoogleText(frame: string): string {
           throw new LlmError(/RESOURCE_EXHAUSTED/i.test(status) ? 'GEMINI_QUOTA' : 'GEMINI_RATE_LIMIT', message.slice(0, 200))
         if (/SAFETY|blocked|blockReason/i.test(message))
           throw new LlmError('GEMINI_SAFETY', message.slice(0, 200))
+        if (/input token count exceeds|maximum number of tokens allowed|exceeds the maximum.*tokens/i.test(message))
+          throw new LlmError('GEMINI_CONTEXT_LIMIT', message.slice(0, 200))
         if (/INVALID_ARGUMENT.*fileData|fileData.*video|cannot be processed/i.test(message))
           throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', message.slice(0, 200))
         throw new LlmError('GEMINI_TIMEOUT', `stream error ${code}: ${message.slice(0, 200)}`)

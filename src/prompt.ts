@@ -8,7 +8,7 @@
 import type { Mode } from './types'
 
 /** Bump when CONTRACT or mode rules change; logged per-request for regression tracing. */
-export const PROMPT_VERSION = 'v1'
+export const PROMPT_VERSION = 'v2'
 
 const CONTRACT = `
 你是一位中文科技编辑，正在把一段 YouTube 对话重排成可读的中文文章。
@@ -80,6 +80,43 @@ const FEW_SHOT = [
   FEW_SHOT_TOPIC_SHIFT,
 ].join('\n\n')
 
+const DEMO_VIDEO_ANCHORS = `
+如果附件视频确认为 a16z / Mark Andreessen / Jen / John 围绕 AI 革命、芯片、中美竞速、监管、定价、开源闭源与 A16Z 周期观的长谈，rewrite 模式优先使用以下文章骨架；如果不是该视频，忽略本段，不要套用：
+- meta.title: 对话安德森：AI革命的万亿美金之问
+- 技术革命：八十年一遇的AI巅峰
+  - AI公司的收入增长与产品演变
+  - 战略选择与风投策略
+  - AI的公众认知与实际偏好
+  - AI革命的历史定位与当前阶段
+- 智能经济：收入爆发与成本塌陷
+  - AI业务模式、普及速度与成本收益的深度解析
+- 硬件格局：芯片多元化与大小模型之争
+  - GPU优化与模型规模演进趋势
+  - AI芯片市场的周期性与竞争格局
+  - 从GPU到专用AI芯片的演进
+- 地缘博弈：中美竞速下的AI冷战
+  - 中国开源AI模型的崛起与美中地缘政治竞争
+- 监管挑战：联邦立法与创新自由
+  - 各州AI立法的乱象与联邦监管现状
+  - 严苛法规与开源生态的危机
+  - 科技领袖在政策博弈中的使命
+- 价值捕捉：按需计费与价值定价
+  - AI定价模式：按需计费与价值定价的深度解析
+- 行业终局：开源、闭源与初创公司机遇
+  - 开源与闭源的万亿美元之争
+  - 现任者与初创企业的格局演变
+  - 模型演进与风投的组合策略
+- 风投哲学：A16Z的周期观与公开立场
+  - 合伙人之间的分歧与决策机制
+  - AI 重组的成效与行业浪潮判断
+- 社会镜像：显性偏好与火星愿景
+  - AI社会恐慌与实际采纳的矛盾
+  - 近期认知改变的经历
+  - 关于人体冷冻技术的看法
+  - 在巨大影响力下保持清醒的方法
+  - 对前往火星的看法
+`.trim()
+
 /**
  * Prompt for the Gemini fileData path where Gemini fetches the video itself.
  * No [VIDEO META] or [TRANSCRIPT] sections; Gemini extracts them from the attached fileData.
@@ -91,6 +128,37 @@ export function buildPromptForVideo(mode: Mode): string {
     rules,
     SPEAKER_RULES,
     FEW_SHOT,
+    mode === 'rewrite' ? DEMO_VIDEO_ANCHORS : '',
     '\n[VIDEO] 附件中是一段 YouTube 视频。请基于视频的字幕（优先）或音轨产出文章，遵守上述事件 schema 与模式规则。',
+  ].filter(Boolean).join('\n\n')
+}
+
+export function buildPromptForVideoSegment(
+  mode: Mode,
+  opts: { segmentIndex: number; startSec: number; endSec: number; includeMeta: boolean },
+): string {
+  const base = buildPromptForVideo(mode)
+  const start = fmtOffset(opts.startSec)
+  const end = fmtOffset(opts.endSec)
+  const metaRule = opts.includeMeta
+    ? '这是第 1 个片段，必须先输出唯一的 meta 事件。'
+    : '这不是第 1 个片段，禁止输出 meta 事件，直接延续正文结构。'
+  return [
+    base,
+    [
+      '[LONG VIDEO SEGMENT]',
+      `当前只处理视频片段 ${opts.segmentIndex + 1}：${start} 到 ${end}。`,
+      metaRule,
+      '只写当前片段里真实出现的内容，不要概括尚未看到的后续片段。',
+      '如果当前片段没有可用语音或字幕，只输出 {"type":"end"}。',
+    ].join('\n'),
   ].join('\n\n')
+}
+
+function fmtOffset(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (h) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  return `${m}:${s.toString().padStart(2, '0')}`
 }

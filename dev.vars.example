@@ -13,3 +13,9 @@ GEMINI_API_KEY=your-gemini-api-key-here
 
 # Optional: pin a single model (overridden by GEMINI_MODELS if both are set)
 # GEMINI_MODEL=gemini-2.5-flash
+
+# Optional: long-video segmentation fallback after Gemini stalls or hits context limits.
+# Still uses Gemini fileData + videoMetadata; no YouTube fetching is performed.
+# LONG_VIDEO_FIRST_SEGMENT_SECONDS=300
+# LONG_VIDEO_SEGMENT_SECONDS=900
+# LONG_VIDEO_MAX_SEGMENTS=16

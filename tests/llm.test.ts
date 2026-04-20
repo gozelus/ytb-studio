@@ -204,6 +204,29 @@ describe('streamChat', () => {
     expect(beats[0]).toBeCloseTo(20 / 1000, 1)
   })
 
+  it('throws GEMINI_STALL when SSE frames arrive but contain no text', async () => {
+    const enc = new TextEncoder()
+    let timer: ReturnType<typeof setInterval> | null = null
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        timer = setInterval(() => {
+          ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[]}}]}\n\n'))
+        }, 10)
+      },
+      cancel() {
+        if (timer) clearInterval(timer)
+      },
+    })
+    mockFetch(() => new Response(body, { status: 200 }))
+
+    const gen = streamChat(cfg, 'p', undefined, {
+      _idleTimeoutMs: 200,
+      _heartbeatIntervalMs: 20,
+      _textIdleTimeoutMs: 50,
+    })
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STALL' })
+  })
+
   it('does not fire onHeartbeat when tokens arrive before interval', async () => {
     const enc = new TextEncoder()
     const body = new ReadableStream<Uint8Array>({

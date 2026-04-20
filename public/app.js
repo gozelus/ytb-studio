@@ -19,6 +19,9 @@ const state = {
   revealDone: false,     // true once reveal animation hands off to articleView
   renderQueue: [],       // body events buffered during reveal
   renderTickHandle: null, // setInterval handle for throttled paragraph rendering
+  navItems: [],          // streaming article headings rendered in the rail TOC
+  nextHeadingId: 1,
+  navSyncFrame: null,
 }
 
 // ---------- Helpers ----------
@@ -62,9 +65,79 @@ $('themeBtn').addEventListener('click', () => {
 
 // ---------- Rail toggle ----------
 $('railToggle').addEventListener('click', () => {
-  const collapsed = $('rail').classList.toggle('collapsed')
-  $('railToggle').textContent = collapsed ? '›' : '‹'
+  setRailCollapsed(!$('rail').classList.contains('collapsed'))
 })
+
+function setRailCollapsed(collapsed) {
+  $('rail').classList.toggle('collapsed', collapsed)
+  $('railToggle').textContent = collapsed ? '›' : '‹'
+  $('railToggle').setAttribute('aria-label', collapsed ? '展开侧栏' : '折叠侧栏')
+}
+
+function resetRailArticle() {
+  state.navItems = []
+  state.nextHeadingId = 1
+  if (state.navSyncFrame) { cancelAnimationFrame(state.navSyncFrame); state.navSyncFrame = null }
+  $('railArticle').hidden = true
+  $('railArticleTitle').textContent = '—'
+  $('railToc').innerHTML = ''
+  $('rail').classList.remove('reading')
+}
+
+function showRailArticle(metaEv) {
+  resetRailArticle()
+  $('rail').classList.add('reading')
+  $('railArticle').hidden = false
+  $('railArticleTitle').textContent = metaEv.title || '正在生成文章'
+  appendRailNav('articleH1', '文章开头', 'top')
+  activateRailNav('articleH1')
+}
+
+function registerRailHeading(node, ev) {
+  if (ev.type !== 'h2' && ev.type !== 'h3') return
+  node.id = node.id || `section-${state.nextHeadingId++}`
+  appendRailNav(node.id, ev.text || '未命名章节', ev.type)
+  scheduleRailActiveSync()
+}
+
+function appendRailNav(targetId, text, level) {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = `toc-item toc-${level}`
+  btn.dataset.target = targetId
+  btn.textContent = text
+  btn.addEventListener('click', () => jumpToRailTarget(targetId))
+  $('railToc').appendChild(btn)
+  state.navItems.push({ targetId, btn })
+}
+
+function jumpToRailTarget(targetId) {
+  const target = $(targetId)
+  const article = $('articleView')
+  if (!target || !article) return
+  article.scrollTop = Math.max(0, target.offsetTop - 28)
+  activateRailNav(targetId)
+}
+
+function activateRailNav(targetId) {
+  for (const item of state.navItems) item.btn.classList.toggle('active', item.targetId === targetId)
+}
+
+function scheduleRailActiveSync() {
+  if (state.navSyncFrame) return
+  state.navSyncFrame = requestAnimationFrame(() => {
+    state.navSyncFrame = null
+    const article = $('articleView')
+    let active = state.navItems[0]?.targetId
+    for (const item of state.navItems) {
+      const node = $(item.targetId)
+      if (node && node.offsetTop - 80 <= article.scrollTop) active = item.targetId
+    }
+    if (active) activateRailNav(active)
+  })
+}
+
+$('articleView').addEventListener('scroll', scheduleRailActiveSync)
 
 // ---------- URL validation ----------
 function validateUrl(raw) {
@@ -95,6 +168,8 @@ async function start() {
 
   $('hero').classList.add('out')
   $('rail').classList.add('in')
+  setRailCollapsed(false)
+  resetRailArticle()
   $('topbar').classList.add('in')
   $('topUrl').textContent = url
   $('railUrl').textContent = url
@@ -236,6 +311,8 @@ function enterArticle(metaEv) {
   $('articleH1').textContent = title
   $('articleMeta').textContent = metaParts.join(' · ')
   document.title = title
+  showRailArticle({ ...metaEv, title })
+  setRailCollapsed(true)
   hideAllViews()
   const rv = $('revealView')
   // Reset animation state so replay works (CSS keyframes won't restart if .play already present)
@@ -263,11 +340,14 @@ function renderEvent(ev) {
     if ((ev.idleSeconds ?? 0) >= 20) setTipToWarm()
     return
   }
+  if (state.articleEnded && ev.type !== 'end') return
   if (ev.type === 'error') { showInterrupt(ev.code ?? 'INTERNAL', ev.message); return }
   if (ev.type === 'end') {
+    if (state.articleEnded) return
+    state.articleEnded = true
     const finalize = () => {
       removeCaret(); clearStallIndicator(); setStatus('完成')
-      state.articleEnded = true; stopRenderTick(); finishRun()
+      stopRenderTick(); finishRun()
     }
     if (state.renderQueue.length === 0 && state.revealDone) finalize()
     else state.renderQueue.push({ type: '__end', finalize })
@@ -306,6 +386,7 @@ function renderEventNow(ev) {
   }
   node.classList.add('fade-node')
   body.appendChild(node)
+  registerRailHeading(node, ev)
 }
 
 function removeCaret() {
@@ -453,6 +534,8 @@ const ERROR_COPY = {
   EMPTY_ARTICLE: 'Gemini 没有返回正文，请重试或换一个公开视频。',
   GEMINI_AUTH: 'Gemini API Key 无效或已过期，请检查部署的 GEMINI_API_KEY 配置。',
   GEMINI_QUOTA: 'Gemini 免费额度已用尽（免费档每天仅 20 次）。请为 Gemini key 开启付费计划后重试。',
+  GEMINI_CONTEXT_LIMIT: '视频太长，已超出 Gemini 单次上下文上限。',
+  GEMINI_LONG_VIDEO_LIMIT: '长视频已达到当前分段处理上限。',
   GEMINI_RATE_LIMIT: 'Gemini 当前限流，请 30 秒后重试。',
   GEMINI_SAFETY: '内容触发了 Gemini 的安全策略，该视频无法处理。',
   GEMINI_VIDEO_UNSUPPORTED: '该视频 Gemini 无法直读（私密 / 年龄限制 / 格式不支持）。',
@@ -484,6 +567,8 @@ function resetRun() {
   $('revealView').classList.remove('play')
   $('articleView').classList.remove('show')
   $('statusPill').classList.remove('err')
+  resetRailArticle()
+  setRailCollapsed(false)
   setStatus('idle')
 }
 
@@ -533,6 +618,7 @@ function showInlineError(err) {
 // ---------- Stream-phase interrupt ----------
 function showInterrupt(code, message) {
   if (state.cancelled) return
+  state.articleEnded = true
   setStatus('⚠ 已中断', true)
   removeCaret()
   finishRun()
@@ -570,8 +656,8 @@ function backToHero() {
   // Set cancelled before abort() so any async catch in-flight sees it immediately
   state.cancelled = true
   if (state.aborter) state.aborter.abort()
-  $('rail').classList.remove('in', 'collapsed')
-  $('railToggle').textContent = '‹'
+  $('rail').classList.remove('in')
+  setRailCollapsed(false)
   $('topbar').classList.remove('in')
   hideAllViews()
   $('hero').classList.remove('out')

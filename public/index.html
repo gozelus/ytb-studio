@@ -64,6 +64,26 @@
     .mode .opt.on { color:var(--fg); }
     .mode .opt::before { content:'○'; font-size:11px; color:var(--subtle); }
     .mode .opt.on::before { content:'●'; color:var(--accent); }
+    .rail-article { display:flex; flex:1; min-height:120px; flex-direction:column;
+      gap:8px; padding-top:14px; border-top:1px solid var(--border); overflow:hidden; }
+    .rail-article[hidden] { display:none; }
+    .rail-title { font-size:14px; line-height:1.45; font-weight:600;
+      max-height:4.4em; overflow:hidden; }
+    .rail-toc { display:flex; flex-direction:column; gap:2px; min-height:0;
+      overflow-y:auto; padding-right:2px; }
+    .toc-item { width:100%; border:0; border-left:1px solid transparent;
+      background:transparent; color:var(--subtle); cursor:pointer;
+      text-align:left; border-radius:3px; padding:5px 6px;
+      font:12px/1.4 'Noto Serif SC', serif; }
+    .toc-item:hover, .toc-item.active {
+      color:var(--fg); border-left-color:var(--accent);
+      background:color-mix(in srgb, var(--fg) 7%, transparent);
+    }
+    .toc-h3 { padding-left:16px; font-size:11px; }
+    .toc-top { font-family:'JetBrains Mono', monospace; font-size:10px;
+      text-transform:uppercase; letter-spacing:1px; }
+    .rail-footer { margin-top:auto; }
+    .rail.reading .rail-footer { margin-top:0; }
 
     /* Main + topbar */
     .main { flex:1; position:relative; overflow:hidden; }
@@ -300,8 +320,16 @@
         <div class="opt" data-mode="faithful">忠实翻译</div>
       </div>
     </div>
+    <div class="rail-article" id="railArticle" hidden>
+      <div>
+        <div class="rail-label">文章</div>
+        <div class="rail-title" id="railArticleTitle">—</div>
+      </div>
+      <div class="rail-label">章节</div>
+      <div class="rail-toc" id="railToc"></div>
+    </div>
     <button class="new-run" id="newRunBtn" hidden>+ 新视频</button>
-    <div style="margin-top:auto;">
+    <div class="rail-footer">
       <div class="rail-label">生成信息</div>
       <div style="color:var(--subtle); font-size:12px; font-family:'JetBrains Mono', monospace;" id="railReq">—</div>
     </div>
