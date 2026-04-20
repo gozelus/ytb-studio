@@ -15,6 +15,7 @@ import type { ErrorCode, Mode, StreamEvent } from './types'
 
 export interface Env {
   GEMINI_API_KEY?: string
+  GEMINI_MODELS?: string
   GEMINI_MODEL?: string
   ASSETS: Fetcher
 }

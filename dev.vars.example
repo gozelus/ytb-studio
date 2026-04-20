@@ -1,19 +1,15 @@
-# Copy this file to .dev.vars and fill in your API key.
+# Copy this file to .dev.vars and fill in your Gemini API key.
 # .dev.vars is gitignored — never commit real keys.
+#
+# Get a key at: https://aistudio.google.com/app/apikey
+# Free tier: 20 req/day per model. Enable billing for production use.
 
-# Option A: OpenRouter (recommended — one key, many models; requires PROXY_URLS)
-LLM_PROVIDER=openrouter
-LLM_MODEL=google/gemini-2.5-flash
-LLM_API_KEY=your-openrouter-key-here
+GEMINI_API_KEY=your-gemini-api-key-here
 
-# Option B: Google Gemini directly (works without proxy via Gemini direct-read fallback)
-# LLM_PROVIDER=google
-# LLM_MODEL=gemini-2.5-flash
-# LLM_API_KEY=your-gemini-key-here
+# Optional: cascading model fallback on overload/quota (comma-separated).
+# When the current model returns 503/overloaded/quota, the next is tried automatically.
+# Default: gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro
+# GEMINI_MODELS=gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro
 
-# Option C: backward-compat shorthand for Google
-# GEMINI_API_KEY=your-gemini-key-here
-
-# SOCKS5 proxy for YouTube fetches (optional; required for non-google providers)
-# Multiple endpoints newline-separated; Worker tries them in order on failure.
-# PROXY_URLS=socks5h://user:pass@host1:port\nsocks5h://user:pass@host2:port
+# Optional: pin a single model (overridden by GEMINI_MODELS if both are set)
+# GEMINI_MODEL=gemini-2.5-flash
