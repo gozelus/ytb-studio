@@ -10,6 +10,7 @@
 
 import { $, byAll, hideAllViews, setStatus, showView } from './dom.js'
 import { createArticleRenderer } from './article-renderer.js'
+import { createArticleTailController } from './article-tail.js'
 import { errorMsg } from './error-copy.js'
 import { createGeminiWaitUi } from './gemini-wait.js'
 import { createRailController } from './rail.js'
@@ -47,6 +48,8 @@ const {
   stopGeminiWait,
   updatePrepHeartbeat,
 } = createGeminiWaitUi({ $ })
+
+const articleTail = createArticleTailController({ $ })
 
 const {
   renderEventNow,
@@ -205,6 +208,7 @@ async function consumeSse(body) {
           continue
         }
         if (!enteredArticle && ev.type === 'heartbeat') {
+          articleTail.handleHeartbeat(ev)
           updatePrepHeartbeat(ev.idleSeconds ?? 0, ev.stage, ev)
           continue
         }
@@ -253,6 +257,7 @@ function enterArticle(metaEv) {
   $('articleMeta').textContent = metaParts.join(' · ')
   document.title = title
   showRailArticle({ ...metaEv, title })
+  articleTail.start()
   setRailCollapsed(true)
   hideAllViews()
   const rv = $('revealView')
@@ -277,6 +282,7 @@ function fallbackMeta() {
 
 function renderEvent(ev) {
   if (ev.type === 'heartbeat') {
+    articleTail.handleHeartbeat(ev)
     updateStallIndicator(ev.idleSeconds ?? 0)
     if ((ev.idleSeconds ?? 0) >= 20) setTipToWarm()
     return
@@ -288,6 +294,7 @@ function renderEvent(ev) {
     state.articleEnded = true
     const finalize = () => {
       removeCaret(); clearStallIndicator(); setStatus('完成')
+      articleTail.complete()
       stopRenderTick(); finishRun()
     }
     if (state.renderQueue.length === 0 && state.revealDone) finalize()
@@ -295,6 +302,7 @@ function renderEvent(ev) {
     return
   }
   // h2/h3/p: buffer during reveal, drain via tick once revealDone
+  articleTail.markContentEvent(ev)
   state.renderQueue.push(ev)
   if (state.revealDone) startRenderTick()
 }
@@ -343,6 +351,8 @@ function updateStallIndicator(s) {
       if (state.aborter) state.aborter.abort()
       clearStallIndicator()
       setStatus('⚠ 已中断', true)
+      articleTail.interrupt()
+      removeCaret()
       finishRun()
     })
     actions.append(keepBtn, abortBtn)
@@ -371,6 +381,7 @@ function resetRun() {
   state.aborter = null
   $('hintErr').textContent = ''
   $('articleBody').innerHTML = ''
+  articleTail.reset()
   $('prepView').querySelectorAll('.interrupt').forEach(n => n.remove())
   clearStallIndicator()
   stopGeminiWait()
@@ -433,6 +444,7 @@ function showInterrupt(code, message) {
   state.articleEnded = true
   setStatus('⚠ 已中断', true)
   removeCaret()
+  articleTail.interrupt()
   finishRun()
   const body = $('articleBody')
   const estimatedPct = estimateProgress()

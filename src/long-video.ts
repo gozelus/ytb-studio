@@ -35,6 +35,15 @@ export async function streamLongVideoSegments(opts: {
   const streamRange = async (segmentIndex: number, startSec: number, endSec: number, depth = 0): Promise<number> => {
     const progress = { firstChunk: false, events: 0 }
     log({ reqId: opts.reqId, route: '/api/generate', phase: 'long_video.segment.start', videoId: opts.videoId, segmentIndex, startSec, endSec, depth })
+    await opts.writeEvent({
+      type: 'heartbeat',
+      idleSeconds: 0,
+      stage: 'long_video_segment_start',
+      segmentIndex,
+      maxSegments,
+      startSec,
+      endSec,
+    })
     try {
       await streamVideoNdjson({
         cfg: opts.cfg,
@@ -61,7 +70,15 @@ export async function streamLongVideoSegments(opts: {
           opts.writeEvent(e)
           return true
         },
-        onHeartbeat: idleSeconds => opts.writeEvent({ type: 'heartbeat', idleSeconds, stage: `long_video_segment_${segmentIndex + 1}` }),
+        onHeartbeat: idleSeconds => opts.writeEvent({
+          type: 'heartbeat',
+          idleSeconds,
+          stage: `long_video_segment_${segmentIndex + 1}`,
+          segmentIndex,
+          maxSegments,
+          startSec,
+          endSec,
+        }),
         onModelFallback: (from, to, reason) => {
           void opts.writeEvent({ type: 'heartbeat', idleSeconds: 0, stage: 'model_fallback', from, to, reason })
         },
@@ -73,6 +90,16 @@ export async function streamLongVideoSegments(opts: {
         noFallbackCodes: ['GEMINI_STALL', 'GEMINI_CONTEXT_LIMIT'],
       })
       log({ reqId: opts.reqId, route: '/api/generate', phase: 'long_video.segment.done', videoId: opts.videoId, segmentIndex, startSec, endSec, depth, events: progress.events })
+      await opts.writeEvent({
+        type: 'heartbeat',
+        idleSeconds: 0,
+        stage: 'long_video_segment_done',
+        segmentIndex,
+        maxSegments,
+        startSec,
+        endSec,
+        events: progress.events,
+      })
       return progress.events
     } catch (err) {
       if (opts.request.signal.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted')
