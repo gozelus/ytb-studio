@@ -9,35 +9,12 @@
 </head>
 <body>
 <div class="frame">
-  <aside class="rail" id="rail">
-    <button class="rail-toggle" id="railToggle" aria-label="折叠侧栏">‹</button>
-    <div><div class="rail-label">URL</div><div class="mini-input" id="railUrl">—</div></div>
-    <div>
-      <div class="rail-label">模式</div>
-      <div class="mode" id="railMode">
-        <div class="opt on" data-mode="rewrite">深度改写</div>
-        <div class="opt" data-mode="faithful">忠实翻译</div>
-      </div>
-    </div>
-    <div class="rail-article" id="railArticle" hidden>
-      <div>
-        <div class="rail-label">文章</div>
-        <div class="rail-title" id="railArticleTitle">—</div>
-      </div>
-      <div class="rail-label">章节</div>
-      <div class="rail-toc" id="railToc"></div>
-    </div>
-    <button class="new-run" id="newRunBtn" hidden>+ 新视频</button>
-    <div class="rail-footer">
-      <div class="rail-label">生成信息</div>
-      <div class="rail-req" id="railReq">—</div>
-    </div>
-  </aside>
   <main class="main">
     <div class="topbar" id="topbar">
       <svg class="sparkle brand-sm" id="brandLogo" viewBox="-50 -50 100 100"><g class="spin"><g class="breath"><path class="bar-h" d="M-46 0 C-16 -2 -2 -16 0 -46 C2 -16 16 -2 46 0 C16 2 2 16 0 46 C-2 16 -16 2 -46 0 Z"/><circle class="small" cx="30" cy="30" r="3"/><circle class="small" cx="-30" cy="-30" r="3"/><circle class="small" cx="30" cy="-30" r="2"/><circle class="small" cx="-30" cy="30" r="2"/></g></g></svg>
       <div class="mini-url" id="topUrl">—</div>
       <div class="status-pill" id="statusPill">idle</div>
+      <button class="top-new-run" id="newRunBtn" hidden>新视频</button>
     </div>
     <!-- Hero -->
     <div class="hero" id="hero">
@@ -50,10 +27,6 @@
         <button class="go" id="go">生成</button>
       </div>
       <div class="hint-err" id="hintErr"></div>
-      <div class="mode-inline" id="heroMode">
-        <div class="opt on" data-mode="rewrite">深度改写</div>
-        <div class="opt" data-mode="faithful">忠实翻译</div>
-      </div>
     </div>
 
     <!-- Prep -->
@@ -89,7 +62,14 @@
         <div id="articleBody"></div>
         <div id="articleTail" class="article-tail" hidden>
           <div class="tail-thinking" aria-hidden="true">
-            <span></span><span></span><span></span>
+            <svg viewBox="-50 -50 100 100">
+              <g class="tail-spin">
+                <path class="tail-star" d="M-38 0 C-12 -2 -2 -12 0 -38 C2 -12 12 -2 38 0 C12 2 2 12 0 38 C-2 12 -12 2 -38 0 Z"/>
+                <circle class="tail-dot d1" cx="30" cy="30" r="3"/>
+                <circle class="tail-dot d2" cx="-30" cy="-30" r="3"/>
+                <circle class="tail-dot d3" cx="30" cy="-30" r="2"/>
+              </g>
+            </svg>
           </div>
           <div class="tail-copy">
             <div id="articleTailTitle" class="tail-title">AI 正在继续生成</div>

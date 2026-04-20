@@ -8,16 +8,14 @@
  *             entry of a new run (start/retry/regenerate), never inside resetRun().
  */
 
-import { $, byAll, hideAllViews, setStatus, showView } from './dom.js'
+import { $, hideAllViews, setStatus, showView } from './dom.js'
 import { createArticleRenderer } from './article-renderer.js'
 import { createArticleTailController } from './article-tail.js'
 import { errorMsg } from './error-copy.js'
 import { createGeminiWaitUi } from './gemini-wait.js'
-import { createRailController } from './rail.js'
 
 // ---------- State ----------
 const state = {
-  mode: 'rewrite',
   reqId: null,
   aborter: null,
   revealTimer: null,     // setTimeout handle for the reveal→article transition
@@ -26,20 +24,7 @@ const state = {
   revealDone: false,     // true once reveal animation hands off to articleView
   renderQueue: [],       // body events buffered during reveal
   renderTickHandle: null, // setInterval handle for throttled paragraph rendering
-  navItems: [],          // streaming article headings rendered in the rail TOC
-  nextHeadingId: 1,
-  navSyncFrame: null,
 }
-
-const {
-  bindRailControls,
-  copyReqId,
-  registerRailHeading,
-  renderRailReq,
-  resetRailArticle,
-  setRailCollapsed,
-  showRailArticle,
-} = createRailController({ state, $ })
 
 const {
   clearPrepHeartbeat,
@@ -55,19 +40,7 @@ const {
   renderEventNow,
   removeCaret,
   resetArticleRenderer,
-} = createArticleRenderer({ $, state, registerRailHeading, clearStallIndicator })
-
-function setModeEverywhere(mode) {
-  state.mode = mode
-  byAll('[data-mode]').forEach(el => el.classList.toggle('on', el.dataset.mode === mode))
-}
-
-bindRailControls()
-
-// ---------- Mode selection (hero + rail) ----------
-byAll('[data-mode]').forEach(el => {
-  el.addEventListener('click', () => setModeEverywhere(el.dataset.mode))
-})
+} = createArticleRenderer({ $, state, registerRailHeading: () => {}, clearStallIndicator })
 
 // ---------- Theme ----------
 const savedTheme = localStorage.getItem('ytb-theme')
@@ -111,13 +84,8 @@ async function start() {
   $('go').disabled = true
 
   $('hero').classList.add('out')
-  $('rail').classList.add('in')
-  setRailCollapsed(false)
-  resetRailArticle()
   $('topbar').classList.add('in')
   $('topUrl').textContent = url
-  $('railUrl').textContent = url
-  $('rail').classList.add('dimmed')
 
   try {
     await runInspect(url)
@@ -137,7 +105,6 @@ async function runInspect(url) {
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
-  renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL' }
 
   setStatus('生成中')
@@ -157,7 +124,7 @@ async function runGenerate() {
     res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: $('url').value, mode: state.mode }),
+      body: JSON.stringify({ url: $('url').value }),
       signal: state.aborter.signal,
     })
   } catch (err) {
@@ -171,7 +138,6 @@ async function runGenerate() {
   const streamReqId = res.headers.get('x-req-id')
   if (streamReqId) {
     state.reqId = streamReqId
-    renderRailReq()
   }
   setStatus('唤醒 Gemini')
   startGeminiWait()
@@ -256,9 +222,7 @@ function enterArticle(metaEv) {
   $('articleH1').textContent = title
   $('articleMeta').textContent = metaParts.join(' · ')
   document.title = title
-  showRailArticle({ ...metaEv, title })
   articleTail.start()
-  setRailCollapsed(true)
   hideAllViews()
   const rv = $('revealView')
   // Reset animation state so replay works (CSS keyframes won't restart if .play already present)
@@ -372,7 +336,6 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null
-  renderRailReq()
   state.articleEnded = false
   state.revealDone = false
   state.renderQueue = []
@@ -390,8 +353,6 @@ function resetRun() {
   $('revealView').classList.remove('play')
   $('articleView').classList.remove('show')
   $('statusPill').classList.remove('err')
-  resetRailArticle()
-  setRailCollapsed(false)
   setStatus('idle')
 }
 
@@ -422,6 +383,23 @@ function ensureInlineActions(container, buttons) {
   }
   container.appendChild(box)
   return box
+}
+
+async function copyReqId(el) {
+  if (!state.reqId) return
+  const original = el.textContent
+  try {
+    await navigator.clipboard.writeText(state.reqId)
+    el.textContent = '已复制'
+    el.classList.add('copied')
+    setTimeout(() => { el.textContent = original; el.classList.remove('copied') }, 1200)
+  } catch {
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
 }
 
 // ---------- Prep-phase error ----------
@@ -464,7 +442,6 @@ function estimateProgress() {
 
 // ---------- Run completion ----------
 function finishRun() {
-  $('rail').classList.remove('dimmed')
   $('url').disabled = false
   $('go').disabled = false
   $('newRunBtn').hidden = false
@@ -480,8 +457,6 @@ function backToHero() {
   // Set cancelled before abort() so any async catch in-flight sees it immediately
   state.cancelled = true
   if (state.aborter) state.aborter.abort()
-  $('rail').classList.remove('in')
-  setRailCollapsed(false)
   $('topbar').classList.remove('in')
   hideAllViews()
   $('hero').classList.remove('out')
@@ -492,7 +467,6 @@ function backToHero() {
 function retry() {
   state.cancelled = false
   resetRun()
-  $('rail').classList.add('dimmed')
   runInspect($('url').value).catch(showInlineError)
 }
 
@@ -501,7 +475,6 @@ function regenerate() {
   resetRun()
   $('articleView').classList.add('out')
   showView('prepView')
-  $('rail').classList.add('dimmed')
   runInspect($('url').value).catch(showInlineError)
 }
 
