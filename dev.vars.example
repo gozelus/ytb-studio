@@ -5,6 +5,7 @@
 # Free tier: 20 req/day per model. Enable billing for production use.
 
 GEMINI_API_KEY=your-gemini-api-key-here
+SHARECODE=change-this-sharecode
 
 # Optional: cascading model fallback on overload/quota (comma-separated).
 # When the current model returns 503/overloaded/quota, the next is tried automatically.

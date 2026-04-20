@@ -1,4 +1,5 @@
 export interface Env {
+  SHARECODE?: string
   GEMINI_API_KEY?: string
   GEMINI_MODELS?: string
   GEMINI_MODEL?: string

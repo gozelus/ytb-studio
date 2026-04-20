@@ -1,8 +1,9 @@
 /**
  * [WHAT] Cloudflare Worker entry point: routes API requests and serves static assets.
  * [WHY]  Keep the deployment shape as a single Worker while moving route internals into modules.
- * [INVARIANT] /api/generate always responds HTTP 200 immediately, then streams SSE events.
- *             Errors mid-stream are delivered as {"type":"error"} events, not HTTP status codes.
+ * [INVARIANT] Authorized /api/generate requests respond HTTP 200 immediately, then stream SSE events.
+ *             Auth failures fail before any Gemini work; errors mid-stream are delivered as
+ *             {"type":"error"} events, not HTTP status codes.
  */
 
 import { inspect, generate, json } from './routes'

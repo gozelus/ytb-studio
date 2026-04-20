@@ -8,6 +8,7 @@
 
 ```bash
 wrangler secret put GEMINI_API_KEY
+wrangler secret put SHARECODE
 ```
 
 ### 模型配置（鲁棒推荐）
@@ -28,8 +29,8 @@ GEMINI_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro"
 
 ## 工作方式
 
-1. `/api/inspect` 只校验 YouTube URL 并解析 videoId，不访问 YouTube
-2. `/api/generate` 把用户输入的 YouTube URL 作为 Gemini `fileData.fileUri`
+1. `/api/inspect` 先校验 `SHARECODE`，再校验 YouTube URL 并解析 videoId，不访问 YouTube
+2. `/api/generate` 先校验 `SHARECODE`，再把用户输入的 YouTube URL 作为 Gemini `fileData.fileUri`
 3. 默认用低媒体分辨率和低 FPS 降低长视频 token；若仍超出上下文，再用 `videoMetadata` 按时间片分段直读
 4. Gemini 流式输出中文文章，以 SSE ndjson 事件流返回前端
 
@@ -49,7 +50,7 @@ LONG_VIDEO_MAX_SEGMENTS = "16"
 ## 本地开发
 
 ```bash
-cp dev.vars.example .dev.vars   # 填入 GEMINI_API_KEY
+cp dev.vars.example .dev.vars   # 填入 GEMINI_API_KEY 和 SHARECODE
 npm run dev                      # wrangler dev
 npm test                         # vitest
 ```
@@ -58,6 +59,7 @@ npm test                         # vitest
 
 ```bash
 wrangler secret put GEMINI_API_KEY
+wrangler secret put SHARECODE
 wrangler deploy
 ```
 

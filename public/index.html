@@ -3,7 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>ytb-studio</title>
+  <script>
+    (() => {
+      const storageKey = 'ytb-sharecode'
+      const url = new URL(window.location.href)
+      const raw = url.searchParams.get('sharecode')
+      if (raw === null) return
+
+      const sharecode = raw.trim()
+      if (!sharecode) return
+      window.__ytbSharecode = sharecode
+      try {
+        window.localStorage.setItem(storageKey, sharecode)
+      } catch {}
+    })()
+  </script>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -81,6 +97,20 @@
       </div>
     </div>
   </main>
+</div>
+<div class="share-gate" id="shareGate" hidden>
+  <form class="share-panel" id="shareForm">
+    <svg class="sparkle share-logo" viewBox="-50 -50 100 100"><g class="spin"><g class="breath"><path class="bar-h" d="M-46 0 C-16 -2 -2 -16 0 -46 C2 -16 16 -2 46 0 C16 2 2 16 0 46 C-2 16 -16 2 -46 0 Z"/><circle class="small" cx="30" cy="30" r="3"/><circle class="small" cx="-30" cy="-30" r="3"/><circle class="small" cx="30" cy="-30" r="2"/><circle class="small" cx="-30" cy="30" r="2"/></g></g></svg>
+    <div class="share-copy">
+      <div class="share-kicker">private access</div>
+      <div class="share-title">输入 sharecode</div>
+    </div>
+    <div class="share-input-wrap">
+      <input id="shareInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="sharecode">
+      <button id="shareSubmit" type="submit">继续</button>
+    </div>
+    <div class="share-error" id="shareError" aria-live="polite"></div>
+  </form>
 </div>
 <div class="tools">
   <button id="themeBtn" aria-label="切换主题">☾</button>

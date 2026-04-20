@@ -14,6 +14,8 @@ import { createArticleTailController } from './article-tail.js'
 import { errorMsg } from './error-copy.js'
 import { createGeminiWaitUi } from './gemini-wait.js'
 
+const SHARECODE_STORAGE_KEY = 'ytb-sharecode'
+
 // ---------- State ----------
 const state = {
   reqId: null,
@@ -41,6 +43,110 @@ const {
   removeCaret,
   resetArticleRenderer,
 } = createArticleRenderer({ $, state, registerRailHeading: () => {}, clearStallIndicator })
+
+// ---------- Sharecode gate ----------
+let sharecode = ''
+
+initSharecodeGate()
+
+function initSharecodeGate() {
+  const fromQuery = takeBootstrappedSharecode() || readSharecodeFromQuery()
+  if (fromQuery) {
+    sharecode = fromQuery
+    writeStoredSharecode(fromQuery)
+  } else {
+    sharecode = readStoredSharecode()
+  }
+
+  $('shareForm').addEventListener('submit', (e) => {
+    e.preventDefault()
+    const next = $('shareInput').value.trim()
+    if (!next) {
+      showSharecodeGate('请输入 sharecode')
+      return
+    }
+    sharecode = next
+    writeStoredSharecode(next)
+    hideSharecodeGate()
+  })
+
+  if (sharecode) hideSharecodeGate()
+  else showSharecodeGate()
+}
+
+function takeBootstrappedSharecode() {
+  const value = typeof window.__ytbSharecode === 'string' ? window.__ytbSharecode.trim() : ''
+  delete window.__ytbSharecode
+  return value
+}
+
+function readSharecodeFromQuery() {
+  const url = new URL(window.location.href)
+  const value = url.searchParams.get('sharecode')?.trim()
+  return value || ''
+}
+
+function readStoredSharecode() {
+  try {
+    return (localStorage.getItem(SHARECODE_STORAGE_KEY) ?? '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function writeStoredSharecode(value) {
+  try {
+    localStorage.setItem(SHARECODE_STORAGE_KEY, value)
+  } catch {}
+}
+
+function clearStoredSharecode() {
+  sharecode = ''
+  try {
+    localStorage.removeItem(SHARECODE_STORAGE_KEY)
+  } catch {}
+}
+
+function showSharecodeGate(message = '') {
+  const gate = $('shareGate')
+  gate.hidden = false
+  document.body.classList.add('share-locked')
+  $('shareError').textContent = message
+  $('shareInput').value = ''
+  requestAnimationFrame(() => $('shareInput').focus())
+}
+
+function hideSharecodeGate() {
+  $('shareGate').hidden = true
+  document.body.classList.remove('share-locked')
+}
+
+function requireSharecode() {
+  sharecode = sharecode || readStoredSharecode()
+  if (sharecode) return true
+  showSharecodeGate()
+  return false
+}
+
+function apiHeaders() {
+  return {
+    'content-type': 'application/json',
+    'x-sharecode': sharecode,
+  }
+}
+
+function handleInvalidSharecode(message = '无效的 sharecode') {
+  clearStoredSharecode()
+  state.cancelled = true
+  if (state.aborter) state.aborter.abort()
+  $('topbar').classList.remove('in')
+  hideAllViews()
+  $('hero').classList.remove('out')
+  $('url').disabled = false
+  $('go').disabled = false
+  resetRun()
+  showSharecodeGate(message)
+}
 
 // ---------- Theme ----------
 const savedTheme = localStorage.getItem('ytb-theme')
@@ -73,6 +179,7 @@ $('go').addEventListener('click', () => start())
 $('url').addEventListener('keydown', (e) => { if (e.key === 'Enter') start() })
 
 async function start() {
+  if (!requireSharecode()) return
   state.cancelled = false
   const url = $('url').value
   const hintErr = $('hintErr')
@@ -100,12 +207,12 @@ async function runInspect(url) {
   setStatus('连接视频')
   const res = await fetch('/api/inspect', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: apiHeaders(),
     body: JSON.stringify({ url }),
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
-  if (!res.ok) throw { code: data.error ?? 'INTERNAL' }
+  if (!res.ok) throw { code: data.error ?? 'INTERNAL', message: data.message }
 
   setStatus('生成中')
   showView('prepView')
@@ -123,7 +230,7 @@ async function runGenerate() {
   try {
     res = await fetch('/api/generate', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({ url: $('url').value }),
       signal: state.aborter.signal,
     })
@@ -133,7 +240,7 @@ async function runGenerate() {
   }
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({ error: 'INTERNAL' }))
-    throw { code: data.error ?? 'INTERNAL' }
+    throw { code: data.error ?? 'INTERNAL', message: data.message }
   }
   const streamReqId = res.headers.get('x-req-id')
   if (streamReqId) {
@@ -404,6 +511,10 @@ async function copyReqId(el) {
 
 // ---------- Prep-phase error ----------
 function showInlineError(err) {
+  if (err.code === 'INVALID_SHARECODE') {
+    handleInvalidSharecode(err.message || '无效的 sharecode')
+    return
+  }
   stopGeminiWait()
   setStatus('⚠ 已中断', true)
   const msg = err.message ? `${errorMsg(err.code)} · ${err.message}` : errorMsg(err.code)

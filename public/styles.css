@@ -18,6 +18,7 @@ body {
   overflow:hidden;
 }
 .frame { height:100vh; height:100dvh; display:flex; position:relative; overflow:hidden; }
+body.share-locked .frame { filter:blur(6px); transform:scale(1.01); opacity:.38; pointer-events:none; }
 
 /* Tools */
 .tools { position:fixed; top:12px; right:14px; z-index:100;
@@ -93,6 +94,30 @@ body {
 /* Light mode: use --subtle peak (not #fff which would vanish on light bg); no glow */
 html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--fg) 30%,var(--subtle) 50%,var(--fg) 70%,var(--fg) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent; animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) both, h-shimmer 2s linear infinite; }
 .hero .input-wrap{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .3s   both; }
+
+/* Sharecode gate */
+.share-gate { position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+  padding:28px; background:color-mix(in srgb, var(--bg) 74%, transparent);
+  backdrop-filter:blur(14px); }
+.share-gate[hidden] { display:none; }
+.share-panel { width:min(430px,100%); display:flex; flex-direction:column; align-items:center;
+  gap:18px; text-align:center; }
+.share-logo { width:58px; height:58px; filter:drop-shadow(0 0 20px color-mix(in srgb, var(--accent) 16%, transparent)); }
+.share-copy { display:flex; flex-direction:column; gap:5px; }
+.share-kicker { font:10px/1 'JetBrains Mono', monospace; letter-spacing:2px; text-transform:uppercase;
+  color:var(--subtle); }
+.share-title { font-size:24px; font-weight:600; letter-spacing:1.5px; color:var(--fg); }
+.share-input-wrap { width:100%; display:flex; gap:10px; }
+.share-input-wrap input { flex:1; min-width:0; background:transparent; color:var(--fg);
+  border:1px solid var(--border); border-radius:8px; padding:14px 16px;
+  font:15px/1.4 'JetBrains Mono', monospace; transition:border-color .2s; }
+.share-input-wrap input:focus { outline:none; border-color:var(--fg); }
+.share-input-wrap button { background:var(--accent); color:var(--bg); border:none; cursor:pointer;
+  padding:0 24px; border-radius:8px; font:600 14px 'Noto Serif SC', serif; letter-spacing:2px;
+  transition:opacity .2s, transform .2s; }
+.share-input-wrap button:hover { opacity:.88; }
+.share-input-wrap button:active { transform:scale(.97); }
+.share-error { min-height:18px; color:var(--warn); font:12px/1.5 'JetBrains Mono', monospace; }
 
 /* Sparkle logo (inline SVG inside .sparkle elements) */
 .sparkle { display:inline-block; }
@@ -422,6 +447,19 @@ html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--
     margin-top:-6px;
     text-align:left;
     line-height:1.5;
+  }
+
+  .share-gate { padding:22px; }
+  .share-panel { max-width:430px; gap:16px; }
+  .share-title { font-size:22px; }
+  .share-input-wrap {
+    flex-direction:column;
+    gap:10px;
+  }
+  .share-input-wrap input,
+  .share-input-wrap button {
+    width:100%;
+    min-height:48px;
   }
 
   .stage {

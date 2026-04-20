@@ -29,6 +29,7 @@ export type StreamEvent =
   | { type: 'error';     code: string; message: string }
 
 export type ErrorCode =
+  | 'INVALID_SHARECODE'
   | 'INVALID_URL'
   | 'GEMINI_AUTH'
   | 'GEMINI_OVERLOADED'

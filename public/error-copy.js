@@ -1,4 +1,5 @@
 const ERROR_COPY = {
+  INVALID_SHARECODE: '无效的 sharecode',
   INVALID_URL: '这不是一个合法的 YouTube 链接',
   EMPTY_ARTICLE: 'Gemini 没有返回正文，请重试或换一个公开视频。',
   GEMINI_AUTH: 'Gemini API Key 无效或已过期，请检查部署的 GEMINI_API_KEY 配置。',

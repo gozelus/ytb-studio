@@ -2,9 +2,15 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import worker from '../src/index'
 
 const env = {
+  SHARECODE: 'test-sharecode',
   GEMINI_API_KEY: 'fake',
   ASSETS: { fetch: async () => new Response('asset') },
 } as any
+
+const authedHeaders = {
+  'content-type': 'application/json',
+  'x-sharecode': 'test-sharecode',
+}
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -15,7 +21,7 @@ describe('/api/inspect', () => {
 
     const res = await worker.fetch(new Request('https://local.test/api/inspect', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: authedHeaders,
       body: JSON.stringify({ url: ' https://youtu.be/xRh2sVcNXQ8?t=120 ' }),
     }), env)
 
@@ -28,6 +34,44 @@ describe('/api/inspect', () => {
       title: 'YouTube · xRh2sVcNXQ8',
     })
     expect(body).not.toHaveProperty('tracks')
+  })
+
+  it('rejects invalid sharecode without fetching', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const res = await worker.fetch(new Request('https://local.test/api/inspect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-sharecode': 'wrong' },
+      body: JSON.stringify({ url: 'https://youtu.be/xRh2sVcNXQ8' }),
+    }), env)
+
+    expect(res.status).toBe(401)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const body = await res.json() as any
+    expect(body).toMatchObject({
+      error: 'INVALID_SHARECODE',
+      message: '无效的 sharecode',
+    })
+  })
+
+  it('rejects when SHARECODE is not configured', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const res = await worker.fetch(new Request('https://local.test/api/inspect', {
+      method: 'POST',
+      headers: authedHeaders,
+      body: JSON.stringify({ url: 'https://youtu.be/xRh2sVcNXQ8' }),
+    }), { ...env, SHARECODE: undefined })
+
+    expect(res.status).toBe(401)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const body = await res.json() as any
+    expect(body).toMatchObject({
+      error: 'INVALID_SHARECODE',
+      message: '无效的 sharecode',
+    })
   })
 })
 
@@ -46,7 +90,7 @@ describe('/api/generate', () => {
 
     const res = await worker.fetch(new Request('https://local.test/api/generate', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: authedHeaders,
       body: JSON.stringify({
         url: ' https://youtu.be/xRh2sVcNXQ8?t=120 ',
         trackId: 'legacy.track',
@@ -93,7 +137,7 @@ describe('/api/generate', () => {
 
     const res = await worker.fetch(new Request('https://local.test/api/generate', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: authedHeaders,
       body: JSON.stringify({
         url: 'https://www.youtube.com/watch?v=xRh2sVcNXQ8',
         mode: 'rewrite',
@@ -118,5 +162,24 @@ describe('/api/generate', () => {
       videoMetadata: { startOffset: '0s', endOffset: '180s', fps: 0.25 },
     })
     expect(capturedBodies[1].contents[0].parts[1].text).toContain('[LONG VIDEO SEGMENT]')
+  })
+
+  it('rejects missing sharecode before calling Gemini', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const res = await worker.fetch(new Request('https://local.test/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=xRh2sVcNXQ8' }),
+    }), env)
+
+    expect(res.status).toBe(401)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    const body = await res.json() as any
+    expect(body).toMatchObject({
+      error: 'INVALID_SHARECODE',
+      message: '无效的 sharecode',
+    })
   })
 })
