@@ -104,12 +104,24 @@ export class YoutubeError extends Error {
 export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: {
-      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
       'accept-language': 'en-US,en;q=0.9',
-      'cookie': 'CONSENT=YES+1',
+      'accept-encoding': 'gzip, deflate, br',
+      'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'none',
+      'sec-fetch-user': '?1',
+      'upgrade-insecure-requests': '1',
+      'cookie': 'CONSENT=YES+cb.20220627-19-p0.en+FX+012',
     },
     signal,
   })
+  // log status for diagnosing CF-edge blocking (temporary)
+  console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
   return await res.text()
 }
