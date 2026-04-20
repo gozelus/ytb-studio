@@ -61,10 +61,14 @@ export async function* streamChat(
   cfg: LlmConfig,
   prompt: string,
   signal?: AbortSignal,
-  opts: { _idleTimeoutMs?: number } = {},
+  opts: {
+    _idleTimeoutMs?: number
+    _heartbeatIntervalMs?: number
+    onHeartbeat?: (idleSeconds: number) => void
+  } = {},
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
-  yield* streamGoogle(cfg, prompt, signal, opts._idleTimeoutMs)
+  yield* streamGoogle(cfg, prompt, signal, opts)
 }
 
 // ── keepalive ────────────────────────────────────────────────────────────────
@@ -166,37 +170,48 @@ async function retryingFetch(
   }
 }
 
-const IDLE_TIMEOUT_MS = 45_000
+const IDLE_TIMEOUT_MS = 120_000
+const HEARTBEAT_INTERVAL_MS = 5_000
 
 /**
- * Shared SSE stream consumer. Each reader.read() is raced against an idle watchdog;
- * if no bytes arrive within idleTimeoutMs the generator throws GEMINI_STALL. This
- * prevents long videos from hanging silently when Gemini stalls mid-generation.
+ * Shared SSE stream consumer with progressive heartbeat watchdog.
+ * Each reader.read() Promise is reused across timer cycles — a fresh race every
+ * heartbeatIntervalMs fires onHeartbeat; after idleTimeoutMs total idle the
+ * generator throws GEMINI_STALL. Reusing the same Promise is critical: calling
+ * reader.read() twice on the same reader would cause a concurrent-read error.
  */
 async function* consumeSSE(
   res: Response,
   extractFn: (frame: string) => string,
   signal?: AbortSignal,
   idleTimeoutMs = IDLE_TIMEOUT_MS,
+  heartbeatIntervalMs = HEARTBEAT_INTERVAL_MS,
+  onHeartbeat?: (idleSeconds: number) => void,
 ): AsyncGenerator<string> {
   if (!res.body) throw new LlmError('GEMINI_STREAM_DROP', 'no body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
 
-  // Wraps reader.read() with an idle watchdog timer that cancels cleanly on success.
-  const readOrStall = () => new Promise<ReadableStreamReadResult<Uint8Array>>((res, rej) => {
-    const t = setTimeout(
-      () => rej(new LlmError('GEMINI_STALL', `No tokens from Gemini in ${idleTimeoutMs / 1000}s`)),
-      idleTimeoutMs,
-    )
-    reader.read().then(r => { clearTimeout(t); res(r) }, e => { clearTimeout(t); rej(e) })
-  })
+  // Race readPromise against a short tick; reuse the same Promise until it resolves.
+  const readWithHeartbeat = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    const readPromise = reader.read()
+    let idleMs = 0
+    while (true) {
+      const tick = new Promise<'tick'>(r => setTimeout(r, heartbeatIntervalMs, 'tick'))
+      const result = await Promise.race([readPromise, tick])
+      if (result !== 'tick') return result as ReadableStreamReadResult<Uint8Array>
+      idleMs += heartbeatIntervalMs
+      if (idleMs >= idleTimeoutMs)
+        throw new LlmError('GEMINI_STALL', `No tokens from Gemini in ${idleTimeoutMs / 1000}s`)
+      onHeartbeat?.(idleMs / 1000)
+    }
+  }
 
   try {
     while (true) {
       if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted')
-      const { value, done } = await readOrStall()
+      const { value, done } = await readWithHeartbeat()
       if (done) break
       buf += decoder.decode(value, { stream: true })
       let idx: number
@@ -214,7 +229,12 @@ async function* consumeSSE(
 
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 
-async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSignal, idleTimeoutMs?: number) {
+async function* streamGoogle(
+  cfg: LlmConfig,
+  prompt: string,
+  signal?: AbortSignal,
+  opts: { _idleTimeoutMs?: number; _heartbeatIntervalMs?: number; onHeartbeat?: (idleSeconds: number) => void } = {},
+) {
   const base = 'https://generativelanguage.googleapis.com/v1beta'
   const res = await retryingFetch(`${base}/models/${cfg.model}:streamGenerateContent?alt=sse`, {
     method: 'POST',
@@ -225,7 +245,7 @@ async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSigna
     }),
     signal,
   }, { retries429: 2, retries5xx: 1, signal })
-  yield* consumeSSE(res, extractGoogleText, signal, idleTimeoutMs)
+  yield* consumeSSE(res, extractGoogleText, signal, opts._idleTimeoutMs, opts._heartbeatIntervalMs, opts.onHeartbeat)
 }
 
 function extractGoogleText(frame: string): string {

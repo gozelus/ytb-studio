@@ -193,7 +193,7 @@ describe('streamChat', () => {
     expect(chunks.join('')).toBe('hello')
   })
 
-  it('throws GEMINI_STALL when stream goes idle past timeout', async () => {
+  it('throws GEMINI_STALL when stream goes idle past zombie timeout', async () => {
     const enc = new TextEncoder()
     const body = new ReadableStream<Uint8Array>({
       start(ctrl) {
@@ -203,11 +203,60 @@ describe('streamChat', () => {
     })
     mockFetch(() => new Response(body, { status: 200 }))
 
-    const gen = streamChat(cfg, 'p', undefined, { _idleTimeoutMs: 50 })
+    // _heartbeatIntervalMs=20 _idleTimeoutMs=50 → fires heartbeat at 20ms/40ms then stalls at 50ms
+    const gen = streamChat(cfg, 'p', undefined, {
+      _idleTimeoutMs: 50,
+      _heartbeatIntervalMs: 20,
+    })
     const first = await gen.next()
     expect(first.value).toBe('hello')
-    // Second read: stream has no more data → timeout fires at 50ms
+    // Second read: stream has no more data → heartbeats fire then zombie watchdog throws
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STALL' })
+  })
+
+  it('fires onHeartbeat at each interval while stream is idle', async () => {
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n'))
+      },
+    })
+    mockFetch(() => new Response(body, { status: 200 }))
+
+    const beats: number[] = []
+    const gen = streamChat(cfg, 'p', undefined, {
+      _idleTimeoutMs: 100,
+      _heartbeatIntervalMs: 20,
+      onHeartbeat: (s) => beats.push(s),
+    })
+    await gen.next() // consumes 'hi'
+    // Let heartbeats accumulate then catch the GEMINI_STALL
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STALL' })
+    // Should have fired at 20ms, 40ms, 60ms, 80ms (4 beats before 100ms kill)
+    expect(beats.length).toBeGreaterThanOrEqual(2)
+    expect(beats[0]).toBeCloseTo(20 / 1000, 1)
+  })
+
+  it('does not fire onHeartbeat when tokens arrive before interval', async () => {
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"a"}]}}]}\n\n'))
+        ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"b"}]}}]}\n\n'))
+        ctrl.close()
+      },
+    })
+    mockFetch(() => new Response(body, { status: 200 }))
+
+    const beats: number[] = []
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, 'p', undefined, {
+      _heartbeatIntervalMs: 200,
+      onHeartbeat: (s) => beats.push(s),
+    })) chunks.push(c)
+
+    expect(chunks).toEqual(['a', 'b'])
+    expect(beats).toHaveLength(0)
   })
 
   it('refuses to start when signal already aborted', async () => {

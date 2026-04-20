@@ -201,7 +201,11 @@ async function generateViaGeminiDirect(
         events++
       })
       const fileDataPrompt = `https://www.youtube.com/watch?v=${videoId}\n\n${prompt}`
-      for await (const chunk of streamChat(cfg, fileDataPrompt, request.signal)) {
+      for await (const chunk of streamChat(cfg, fileDataPrompt, request.signal, {
+        onHeartbeat: (idleSeconds) => {
+          writeEvent({ type: 'heartbeat', idleSeconds, stage: 'upstream_thinking' })
+        },
+      })) {
         if (firstChunk) {
           log({ reqId, phase: 'llm.first', durMs: Date.now() - started })
           firstChunk = false
