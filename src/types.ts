@@ -44,4 +44,7 @@ export type ErrorCode =
   | 'LLM_QUOTA'
   | 'LLM_TIMEOUT'
   | 'LLM_STREAM_DROP'
+  | 'GEMINI_QUOTA'
+  | 'GEMINI_SAFETY'
+  | 'GEMINI_VIDEO_UNSUPPORTED'
   | 'INTERNAL'

@@ -87,6 +87,51 @@ describe('countPromptTokens', () => {
       .rejects.toMatchObject({ code: 'LLM_RATE_LIMIT' })
     expect(attempt).toBe(3)
   })
+
+  it('throws GEMINI_QUOTA immediately on 429 RESOURCE_EXHAUSTED (no retry)', async () => {
+    let attempt = 0
+    mockFetch(() => {
+      attempt++
+      return new Response('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}', { status: 429 })
+    })
+    await expect(countPromptTokens(googleCfg, 'x', undefined, { sleepFn: async () => {} }))
+      .rejects.toMatchObject({ code: 'GEMINI_QUOTA' })
+    expect(attempt).toBe(1)  // no retry on quota exhaustion
+  })
+})
+
+// ── Gemini-specific error classification ─────────────────────────────────────
+
+describe('streamChat (google) — Gemini error codes', () => {
+  const cfg: LlmConfig = { provider: 'google', model: 'gemini-2.5-flash', apiKey: 'fake' }
+
+  beforeEach(() => vi.unstubAllGlobals())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('throws GEMINI_SAFETY on 400 with SAFETY in body', async () => {
+    mockFetch(() => new Response(
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"The model response was blocked due to SAFETY"}}',
+      { status: 400 }
+    ))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_SAFETY' })
+  })
+
+  it('throws GEMINI_VIDEO_UNSUPPORTED on 400 without SAFETY (e.g. private video)', async () => {
+    mockFetch(() => new Response(
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"File does not exist"}}',
+      { status: 400 }
+    ))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_VIDEO_UNSUPPORTED' })
+  })
+
+  it('does NOT classify 400 as Gemini-specific for openai provider', async () => {
+    const openaiCfg: LlmConfig = { provider: 'openai', model: 'gpt-4o', apiKey: 'sk' }
+    mockFetch(() => new Response('{"error":"bad request"}', { status: 400 }))
+    const gen = streamChat(openaiCfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_TIMEOUT' })
+  })
 })
 
 // ── streamChat: google ────────────────────────────────────────────────────────

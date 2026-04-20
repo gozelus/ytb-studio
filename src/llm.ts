@@ -83,7 +83,7 @@ export async function countPromptTokens(
     headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
     body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
     signal,
-  }, { sleepFn: opts.sleepFn, signal })
+  }, { sleepFn: opts.sleepFn, signal, provider: 'google' })
   const data = await res.json() as { totalTokens?: number }
   return data.totalTokens ?? 0
 }
@@ -149,9 +149,15 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 async function retryingFetch(
   url: string,
   init: RequestInit,
-  opts: { retries429?: number; retries5xx?: number; sleepFn?: (ms: number) => Promise<void>; signal?: AbortSignal } = {},
+  opts: {
+    retries429?: number
+    retries5xx?: number
+    sleepFn?: (ms: number) => Promise<void>
+    signal?: AbortSignal
+    provider?: LlmConfig['provider']
+  } = {},
 ): Promise<Response> {
-  const { retries429 = 2, retries5xx = 1, sleepFn = sleep, signal } = opts
+  const { retries429 = 2, retries5xx = 1, sleepFn = sleep, signal, provider } = opts
   let attempt429 = 0
   let attempt5xx = 0
   let delay = 1000
@@ -159,20 +165,33 @@ async function retryingFetch(
     const res = await fetch(url, init)
     if (res.ok) return res
     if (res.status === 401 || res.status === 403) throw new LlmError('LLM_AUTH')
-    if (res.status === 429 && attempt429 < retries429) {
-      await sleepFn(delay)
-      if (signal?.aborted) throw new LlmError('LLM_STREAM_DROP', 'aborted during retry')
-      // 1 s → 3 s: two retries stay well under CF Workers' 30 s CPU limit.
-      delay *= 3; attempt429++; continue
+    if (res.status === 429) {
+      // Read body once to distinguish quota exhaustion from transient rate-limiting.
+      // RESOURCE_EXHAUSTED = daily quota gone; no point retrying.
+      const body429 = await res.text().catch(() => '')
+      if (body429.includes('RESOURCE_EXHAUSTED')) {
+        const code = provider === 'google' ? 'GEMINI_QUOTA' : 'LLM_QUOTA'
+        throw new LlmError(code, `quota exhausted: ${body429.slice(0, 200)}`)
+      }
+      if (attempt429 < retries429) {
+        await sleepFn(delay)
+        if (signal?.aborted) throw new LlmError('LLM_STREAM_DROP', 'aborted during retry')
+        // 1 s → 3 s: two retries stay well under CF Workers' 30 s CPU limit.
+        delay *= 3; attempt429++; continue
+      }
+      throw new LlmError('LLM_RATE_LIMIT')
     }
     if (res.status >= 500 && attempt5xx < retries5xx) {
       await sleepFn(1000)
       if (signal?.aborted) throw new LlmError('LLM_STREAM_DROP', 'aborted during retry')
       attempt5xx++; continue
     }
-    if (res.status === 429) throw new LlmError('LLM_RATE_LIMIT')
-    // Include the response body in the error message for diagnostics.
     const body = await res.text().catch(() => '')
+    // Google-specific 400 classification: safety filter vs. unsupported video format.
+    if (provider === 'google' && res.status === 400) {
+      if (body.includes('SAFETY')) throw new LlmError('GEMINI_SAFETY', body.slice(0, 200))
+      throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
+    }
     throw new LlmError('LLM_TIMEOUT', `status ${res.status}: ${body.slice(0, 300)}`)
   }
 }
@@ -219,7 +238,7 @@ async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSigna
       generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
     }),
     signal,
-  }, { retries429: 2, retries5xx: 1, signal })
+  }, { retries429: 2, retries5xx: 1, signal, provider: 'google' })
   yield* consumeSSE(res, extractGoogleText, signal)
 }
 
