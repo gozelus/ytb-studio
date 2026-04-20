@@ -20,6 +20,8 @@
  */
 
 import type { CaptionTrack } from './types'
+import { fetchViaSocks5 } from './proxy'
+import type { ProxyConfig } from './proxy'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/
 
@@ -89,12 +91,12 @@ export function extractVideoInfo(html: string) {
 }
 
 /**
- * Fetches video metadata and caption track list via the watch page (Track 1).
- * Throws YOUTUBE_BLOCKED if blocked or if the page returns no playerResponse,
- * which the caller (/api/inspect) converts into the gemini.direct fallback track.
+ * Fetches video metadata and caption track list via the watch page.
+ * Throws YOUTUBE_BLOCKED if blocked or if the page returns no playerResponse.
+ * If proxy is provided, the watch-page fetch is routed through it.
  */
-export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
-  const html = await fetchWatchPage(videoId, signal)
+export async function fetchVideoInfo(videoId: string, signal?: AbortSignal, proxy?: ProxyConfig) {
+  const html = await fetchWatchPage(videoId, signal, proxy)
   const info = extractVideoInfo(html)
   // Anti-scrape pages occasionally match PR_REGEX but yield an empty PlayerResponse
   // with no videoDetails.videoId; treat both null and empty-id as blocked.
@@ -148,37 +150,48 @@ export class YoutubeError extends Error {
   }
 }
 
+const WATCH_HEADERS: Record<string, string> = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'accept-language': 'en-US,en;q=0.9',
+  'accept-encoding': 'gzip, deflate, br',
+  'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-site': 'none',
+  'sec-fetch-user': '?1',
+  'upgrade-insecure-requests': '1',
+  'cookie': 'CONSENT=YES+cb.20220627-19-p0.en+FX+012',
+}
+
 /**
  * Fetches the YouTube watch page with a full Chrome 131 browser fingerprint.
- * The realistic UA and sec-ch-ua headers reduce (but don't eliminate) 429 rate-limiting on CF edge IPs.
+ * If proxy is provided the request is routed through the SOCKS5 pool; otherwise
+ * direct fetch is used (which is often blocked on CF edge IPs).
  */
-export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-    headers: {
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'accept-language': 'en-US,en;q=0.9',
-      'accept-encoding': 'gzip, deflate, br',
-      'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'sec-fetch-dest': 'document',
-      'sec-fetch-mode': 'navigate',
-      'sec-fetch-site': 'none',
-      'sec-fetch-user': '?1',
-      'upgrade-insecure-requests': '1',
-      'cookie': 'CONSENT=YES+cb.20220627-19-p0.en+FX+012',
-    },
-    signal,
-  })
-  console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status }))
+export async function fetchWatchPage(videoId: string, signal?: AbortSignal, proxy?: ProxyConfig): Promise<string> {
+  const url = `https://www.youtube.com/watch?v=${videoId}`
+  let res: Response
+  if (proxy) {
+    res = await fetchViaSocks5(url, proxy, { headers: WATCH_HEADERS, signal })
+  } else {
+    res = await fetch(url, { headers: WATCH_HEADERS, signal })
+  }
+  console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status, viaProxy: !!proxy }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
   return await res.text()
 }
 
-/** Fetches raw timed-text XML from a caption track's baseUrl. */
-export async function fetchTimedText(baseUrl: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(baseUrl, { signal })
+/** Fetches raw timed-text XML from a caption track's baseUrl. Routed via proxy if provided. */
+export async function fetchTimedText(baseUrl: string, signal?: AbortSignal, proxy?: ProxyConfig): Promise<string> {
+  let res: Response
+  if (proxy) {
+    res = await fetchViaSocks5(baseUrl, proxy, { signal })
+  } else {
+    res = await fetch(baseUrl, { signal })
+  }
   if (!res.ok) throw new YoutubeError('YOUTUBE_BLOCKED')
   return await res.text()
 }
