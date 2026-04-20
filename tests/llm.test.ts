@@ -193,6 +193,23 @@ describe('streamChat', () => {
     expect(chunks.join('')).toBe('hello')
   })
 
+  it('throws GEMINI_STALL when stream goes idle past timeout', async () => {
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        // Send one frame then go silent — simulates Gemini stalling mid-generation
+        ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}\n\n'))
+      },
+    })
+    mockFetch(() => new Response(body, { status: 200 }))
+
+    const gen = streamChat(cfg, 'p', undefined, { _idleTimeoutMs: 50 })
+    const first = await gen.next()
+    expect(first.value).toBe('hello')
+    // Second read: stream has no more data → timeout fires at 50ms
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STALL' })
+  })
+
   it('refuses to start when signal already aborted', async () => {
     const ctrl = new AbortController()
     ctrl.abort()
