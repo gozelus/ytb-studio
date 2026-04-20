@@ -9,7 +9,7 @@
 import type { ErrorCode } from './types'
 
 /** A single content part passed to Gemini: plain text or a fileData URI (e.g. a YouTube URL). */
-export type Part = { text: string } | { fileData: { fileUri: string; mimeType: string } }
+export type Part = { text: string } | { fileData: { fileUri: string; mimeType?: string } }
 
 const API = 'https://generativelanguage.googleapis.com/v1beta'
 
