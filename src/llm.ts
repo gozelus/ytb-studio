@@ -190,6 +190,8 @@ async function retryingFetch(
     // Google-specific 400 classification: safety filter vs. unsupported video format.
     if (provider === 'google' && res.status === 400) {
       if (body.includes('SAFETY')) throw new LlmError('GEMINI_SAFETY', body.slice(0, 200))
+      if (body.includes('API key not valid') || body.includes('API_KEY_INVALID'))
+        throw new LlmError('LLM_AUTH', body.slice(0, 200))
       throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
     }
     throw new LlmError('LLM_TIMEOUT', `status ${res.status}: ${body.slice(0, 300)}`)

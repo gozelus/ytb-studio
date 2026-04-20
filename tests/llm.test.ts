@@ -117,6 +117,24 @@ describe('streamChat (google) — Gemini error codes', () => {
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_SAFETY' })
   })
 
+  it('throws LLM_AUTH on 400 with "API key not valid"', async () => {
+    mockFetch(() => new Response(
+      '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"API key not valid. Please pass a valid API key."}}',
+      { status: 400 }
+    ))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_AUTH' })
+  })
+
+  it('throws LLM_AUTH on 400 with API_KEY_INVALID status', async () => {
+    mockFetch(() => new Response(
+      '{"error":{"code":400,"status":"API_KEY_INVALID","message":"API key not valid."}}',
+      { status: 400 }
+    ))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'LLM_AUTH' })
+  })
+
   it('throws GEMINI_VIDEO_UNSUPPORTED on 400 without SAFETY (e.g. private video)', async () => {
     mockFetch(() => new Response(
       '{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"File does not exist"}}',
