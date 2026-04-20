@@ -346,6 +346,7 @@ const ERROR_COPY = {
   GEMINI_VIDEO_UNSUPPORTED: '该视频 Gemini 无法直读（私密 / 年龄限制 / 格式不支持）。',
   GEMINI_STREAM_DROP: 'Gemini 连接中断（通常是网络或超时），请重试。',
   GEMINI_TIMEOUT: 'Gemini 请求超时，请重试。',
+  GEMINI_OVERLOADED: 'Gemini 模型当前过载（Google 侧临时排队，通常 30 秒内缓解）。请稍后重试。',
   INTERNAL: '内部错误',
 }
 function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知'}）` }
