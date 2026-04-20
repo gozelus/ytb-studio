@@ -222,7 +222,7 @@ async function consumeSse(body) {
         } else if (!gotMeta && ev.type === 'error') {
           // Error arrived before first meta — still in prep stage; show inline error
           state.articleEnded = true  // prevent GEMINI_STREAM_DROP throw at loop exit
-          showInlineError({ code: ev.code ?? 'INTERNAL', step: 4 })
+          showInlineError({ code: ev.code ?? 'INTERNAL' })
           return
         } else {
           renderEvent(ev)
