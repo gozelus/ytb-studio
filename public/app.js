@@ -14,9 +14,12 @@ const state = {
   reqId: null,
   geminiFallbackReason: null,  // set when inspect can't reach YouTube but Gemini direct-read is available
   aborter: null,
-  revealTimer: null,   // setTimeout handle for the reveal→article transition
+  revealTimer: null,     // setTimeout handle for the reveal→article transition
   articleEnded: false,
   cancelled: false,
+  revealDone: false,     // true once reveal animation hands off to articleView
+  renderQueue: [],       // body events buffered during reveal
+  renderTickHandle: null, // setInterval handle for throttled paragraph rendering
 }
 
 // ---------- Helpers ----------
@@ -274,17 +277,36 @@ function enterArticle(metaEv) {
     rv.classList.add('out')
     $('articleView').classList.remove('out')
     $('articleView').classList.add('show')
+    state.revealDone = true
+    startRenderTick()
   }, 3200)
 }
 
 function renderEvent(ev) {
-  // textContent / createTextNode throughout — never innerHTML on LLM output (XSS prevention)
-  const body = $('articleBody')
   if (ev.type === 'heartbeat') {
     updateStallIndicator(ev.idleSeconds ?? 0)
     if ((ev.idleSeconds ?? 0) >= 20) setTipToWarm()
     return
   }
+  if (ev.type === 'error') { showInterrupt(ev.code ?? 'INTERNAL', ev.message); return }
+  if (ev.type === 'end') {
+    const finalize = () => {
+      removeCaret(); clearStallIndicator(); setStatus('完成')
+      state.articleEnded = true; stopRenderTick(); finishRun()
+    }
+    if (state.renderQueue.length === 0 && state.revealDone) finalize()
+    else state.renderQueue.push({ type: '__end', finalize })
+    return
+  }
+  // h2/h3/p: buffer during reveal, drain via tick once revealDone
+  state.renderQueue.push(ev)
+  if (state.revealDone) startRenderTick()
+}
+
+function renderEventNow(ev) {
+  if (ev.type === '__end') { ev.finalize(); return }
+  // textContent / createTextNode throughout — never innerHTML on LLM output (XSS prevention)
+  const body = $('articleBody')
   removeCaret()
   let node
   if (ev.type === 'h2') {
@@ -304,16 +326,6 @@ function renderEvent(ev) {
     node.appendChild(document.createTextNode(ev.text ?? ''))
     const caret = document.createElement('span'); caret.className = 'caret'; caret.id = 'liveCaret'
     node.appendChild(caret)
-  } else if (ev.type === 'end') {
-    removeCaret()
-    clearStallIndicator()
-    setStatus('完成')
-    state.articleEnded = true
-    finishRun()
-    return
-  } else if (ev.type === 'error') {
-    showInterrupt(ev.code ?? 'INTERNAL', ev.message)
-    return
   } else {
     return
   }
@@ -325,6 +337,18 @@ function renderEvent(ev) {
 function removeCaret() {
   const c = document.getElementById('liveCaret')
   if (c) c.remove()
+}
+
+function startRenderTick() {
+  if (state.renderTickHandle) return
+  state.renderTickHandle = setInterval(() => {
+    if (state.renderQueue.length === 0) return
+    renderEventNow(state.renderQueue.shift())
+  }, 350)
+}
+
+function stopRenderTick() {
+  if (state.renderTickHandle) { clearInterval(state.renderTickHandle); state.renderTickHandle = null }
 }
 
 // ---------- Stall indicator ----------
@@ -476,6 +500,9 @@ function resetRun() {
   $('geminiWarning').textContent = ''
   $('prepFallbackBanner').hidden = true
   state.articleEnded = false
+  state.revealDone = false
+  state.renderQueue = []
+  stopRenderTick()
   state.aborter = null
   $('hintErr').textContent = ''
   $('articleBody').innerHTML = ''
