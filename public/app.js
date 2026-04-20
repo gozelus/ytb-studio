@@ -426,7 +426,6 @@ function regenerate() {
   state.cancelled = false
   resetRun()
   $('articleView').classList.add('out')
-  $('articleView').classList.remove('show')
   showView('prepView')
   activateStep(1)
   $('rail').classList.add('dimmed')
