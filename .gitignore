@@ -8,6 +8,9 @@ build/
 .vscode/
 .idea/
 .superpowers/
+.dev.vars
+.wrangler/
+.claude/
 __pycache__/
 *.pyc
 .venv/
