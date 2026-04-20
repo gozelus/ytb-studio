@@ -12,6 +12,7 @@
 const state = {
   mode: 'rewrite',
   reqId: null,
+  geminiFallbackReason: null,  // set when inspect can't reach YouTube but Gemini direct-read is available
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
   articleEnded: false,
@@ -116,6 +117,7 @@ async function runInspect(url) {
   })
   const data = await res.json()
   state.reqId = data.reqId ?? null
+  state.geminiFallbackReason = data.gemini_fallback_reason ?? null
   renderRailReq()
   if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
 
@@ -132,18 +134,32 @@ async function runInspect(url) {
 function showPicker(data) {
   showView('pickView')
   setStatus('等待选择字幕')
-  $('pickTitle').textContent = data.title
-  $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
+  if (state.geminiFallbackReason) {
+    $('pickTitle').textContent = '(视频信息暂不可用)'
+    $('pickMeta').textContent = `共 ${data.tracks.length} 条字幕`
+    $('geminiWarning').textContent = '⚠ 无法从 YouTube 抓取视频信息（部署在数据中心 IP，被 YouTube 限流）。将使用 Gemini 直读模式：由 Google 自己访问视频，不经我们的服务器。'
+  } else {
+    $('pickTitle').textContent = data.title
+    $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
+    $('geminiWarning').textContent = ''
+  }
   const list = $('capList'); list.innerHTML = ''
   const sorted = [...data.tracks].sort((a, b) => (a.kind === 'manual' ? -1 : 1))
   sorted.forEach((t, i) => {
     const el = document.createElement('div')
     el.className = 'cap' + (i === 0 ? ' primary' : '')
-    const k = document.createElement('span'); k.className = 'k'; k.textContent = t.lang.toUpperCase()
+    const k = document.createElement('span'); k.className = 'k'
     const l = document.createElement('span'); l.className = 'l'
-    l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
     const r = document.createElement('span'); r.className = 'r'
-    r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
+    if (t.id === 'gemini.direct') {
+      k.textContent = 'AI'
+      l.textContent = t.label
+      r.textContent = '由 AI 直接解析'
+    } else {
+      k.textContent = t.lang.toUpperCase()
+      l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
+      r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
+    }
     el.append(k, l, r)
     el.addEventListener('click', () => { el.classList.add('picked'); pickTrack(t.id) })
     list.appendChild(el)
@@ -318,6 +334,7 @@ const ERROR_COPY = {
   VIDEO_NOT_FOUND: '视频不存在或已删除',
   NO_CAPTIONS: '这个视频没有可用字幕',
   YOUTUBE_BLOCKED: '当前环境无法连接 YouTube（数据中心 IP 常见），请本地运行 npm run dev 或配置代理',
+  PROXY_REQUIRED: '当前部署无法连接 YouTube（需配置代理）。请设置 PROXY_URL，或改用 LLM_PROVIDER=google 启用 Gemini 直读',
   GEMINI_AUTH: 'Gemini 配置异常（API key 无效或过期）',
   GEMINI_RATE_LIMIT: 'Gemini 速率限制，请稍后再试',
   GEMINI_QUOTA: 'Gemini 免费额度已用尽',
@@ -333,7 +350,9 @@ function resetRun() {
   // Cancel any in-flight reveal→article transition timer
   if (state.revealTimer) { clearTimeout(state.revealTimer); state.revealTimer = null }
   state.reqId = null
+  state.geminiFallbackReason = null
   renderRailReq()
+  $('geminiWarning').textContent = ''
   state.articleEnded = false
   state.aborter = null
   $('hintErr').textContent = ''
@@ -386,13 +405,16 @@ function showInlineError(err) {
   const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
   const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
   if (!host) return
-  ensureInlineActions(host, {
-    msg,
-    list: [
-      { text: '换视频', onClick: backToHero },
-      { text: '重试', primary: true, onClick: retry },
-    ],
-  })
+  const actionList = err.code === 'PROXY_REQUIRED'
+    ? [
+        { text: '换视频', onClick: backToHero },
+        { text: '查看配置文档', primary: true, onClick: () => window.open('https://github.com/gozelus/ytb-studio#proxy-setup', '_blank') },
+      ]
+    : [
+        { text: '换视频', onClick: backToHero },
+        { text: '重试', primary: true, onClick: retry },
+      ]
+  ensureInlineActions(host, { msg, list: actionList })
 }
 
 // ---------- Stream-phase interrupt ----------
