@@ -8,7 +8,8 @@
 
 import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
 import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from './gemini'
-import { buildPrompt, PROMPT_VERSION } from './prompt'
+import type { Part } from './gemini'
+import { buildPrompt, buildPromptForVideo, PROMPT_VERSION } from './prompt'
 import { createNdjsonParser } from './parser'
 import { log, logError, newReqId } from './log'
 import type { ErrorCode, Mode, StreamEvent } from './types'
@@ -133,7 +134,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
         writeEvent(e)
         events++
       })
-      for await (const chunk of streamGenerate(env, prompt, request.signal)) {
+      for await (const chunk of streamGenerate(env, [{ text: prompt }], request.signal)) {
         if (firstChunk) { log({ reqId, phase: 'gemini.first', durMs: Date.now() - started }); firstChunk = false }
         parser.feed(chunk)
       }

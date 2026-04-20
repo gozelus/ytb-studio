@@ -67,7 +67,7 @@ describe('streamGenerate', () => {
     ].join('\n')
     mockFetch(() => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
     const chunks: string[] = []
-    for await (const chunk of streamGenerate(env, 'prompt')) chunks.push(chunk)
+    for await (const chunk of streamGenerate(env, [{ text: 'prompt' }])) chunks.push(chunk)
     expect(chunks.join('')).toBe('{"type":"h2","text":"A"}\n')
   })
 
@@ -82,7 +82,7 @@ describe('streamGenerate', () => {
     })
     mockFetch(() => new Response(body, { status: 200 }))
     const chunks: string[] = []
-    for await (const c of streamGenerate(env, 'p')) chunks.push(c)
+    for await (const c of streamGenerate(env, [{ text: 'p' }])) chunks.push(c)
     expect(chunks.join('')).toBe('hello')
   })
 
@@ -90,7 +90,7 @@ describe('streamGenerate', () => {
     const ctrl = new AbortController()
     ctrl.abort()
     mockFetch(() => new Response('', { status: 200 }))
-    const gen = streamGenerate(env, 'p', ctrl.signal)
+    const gen = streamGenerate(env, [{ text: 'p' }], ctrl.signal)
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STREAM_DROP' })
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
