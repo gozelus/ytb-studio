@@ -146,11 +146,19 @@ function showPicker(data) {
   sorted.forEach((t, i) => {
     const el = document.createElement('div')
     el.className = 'cap' + (i === 0 ? ' primary' : '')
-    const k = document.createElement('span'); k.className = 'k'; k.textContent = t.lang.toUpperCase()
+    const k = document.createElement('span'); k.className = 'k'
     const l = document.createElement('span'); l.className = 'l'
-    l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
     const r = document.createElement('span'); r.className = 'r'
-    r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
+    if (t.id === 'gemini.direct') {
+      // fallback card: "AI" badge, no caption-language jargon (AUTO/自动 don't apply)
+      k.textContent = 'AI'
+      l.textContent = t.label
+      r.textContent = '由 AI 直接解析'
+    } else {
+      k.textContent = t.lang.toUpperCase()
+      l.textContent = `${t.label} · ${t.kind === 'manual' ? '手动' : '自动'}`
+      r.textContent = t.tokens ? `${t.tokens.toLocaleString()} tok` : '—'
+    }
     el.append(k, l, r)
     el.addEventListener('click', () => { el.classList.add('picked'); pickTrack(t.id) })
     list.appendChild(el)
