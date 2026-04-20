@@ -215,7 +215,6 @@ async function generateViaGeminiDirect(
     let firstChunk = true
     let events = 0
     try {
-      await writeEvent({ type: 'meta', reqId, title: `YouTube · ${videoId}`, subtitle: '', durationSec: 0 })
       const parser = createNdjsonParser(e => {
         if (e.type === 'end') return
         writeEvent(e)
@@ -224,7 +223,11 @@ async function generateViaGeminiDirect(
       // Gemini-specific: embed the YouTube URL directly in the prompt for fileData inference
       const fileDataPrompt = `https://www.youtube.com/watch?v=${videoId}\n\n${prompt}`
       for await (const chunk of streamChat(cfg, fileDataPrompt, request.signal)) {
-        if (firstChunk) { log({ reqId, phase: 'llm.first', durMs: Date.now() - started }); firstChunk = false }
+        if (firstChunk) {
+          log({ reqId, phase: 'llm.first', durMs: Date.now() - started })
+          await writeEvent({ type: 'meta', reqId, title: `YouTube · ${videoId}`, subtitle: '', durationSec: 0 })
+          firstChunk = false
+        }
         parser.feed(chunk)
       }
       parser.end()
