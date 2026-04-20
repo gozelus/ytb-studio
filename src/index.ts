@@ -50,6 +50,7 @@ async function inspect(request: Request, env: Env): Promise<Response> {
         const tokens = await countTokens(env, transcript, request.signal)
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens }
       } catch (err) {
+        if (err instanceof GeminiError && err.code === 'GEMINI_AUTH') throw err
         const code = err instanceof GeminiError ? err.code : 'INTERNAL'
         logError({ reqId, route: '/api/inspect', phase: 'inspect.track.error', trackId: t.id, code, err: String(err) })
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens: 0 }
