@@ -36,7 +36,7 @@ async function inspect(request: Request, env: Env): Promise<Response> {
   log({ reqId, route: '/api/inspect', phase: 'start', videoId })
   try {
     const html = await fetchWatchPage(videoId, request.signal)
-    log({ reqId, phase: 'youtube.fetch', durMs: Date.now() - started, bytes: html.length })
+    log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started, bytes: html.length })
     const info = extractVideoInfo(html)
     if (!info || !info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
@@ -50,12 +50,13 @@ async function inspect(request: Request, env: Env): Promise<Response> {
         const tokens = await countTokens(env, transcript, request.signal)
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens }
       } catch (err) {
-        logError({ reqId, phase: 'inspect.track.error', trackId: t.id, err: String(err) })
+        const code = err instanceof GeminiError ? err.code : 'INTERNAL'
+        logError({ reqId, route: '/api/inspect', phase: 'inspect.track.error', trackId: t.id, code, err: String(err) })
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens: 0 }
       }
     }))
 
-    log({ reqId, phase: 'done', durMs: Date.now() - started, trackCount: tracks.length })
+    log({ reqId, route: '/api/inspect', phase: 'done', durMs: Date.now() - started, trackCount: tracks.length })
     return json(200, { reqId, videoId: info.videoId, title: info.title, channel: info.channel, durationSec: info.durationSec, tracks })
   } catch (err) {
     const code: ErrorCode = err instanceof YoutubeError ? err.code
