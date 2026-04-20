@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { countTokens, streamGenerate, GeminiError } from '../src/gemini'
+import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from '../src/gemini'
 
 function mockFetch(impl: (req: Request) => Promise<Response> | Response) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -92,5 +92,33 @@ describe('streamGenerate', () => {
     const gen = streamGenerate(env, 'p', ctrl.signal)
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STREAM_DROP' })
     expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('keepaliveTransform', () => {
+  it('inserts keepalive comment after idle (real timers)', async () => {
+    const ts = keepaliveTransform(40)
+    const writer = ts.writable.getWriter()
+    const reader = ts.readable.getReader()
+    const dec = new TextDecoder()
+    const chunks: string[] = []
+
+    const drain = (async () => {
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        chunks.push(dec.decode(value))
+      }
+    })()
+
+    await writer.write(new TextEncoder().encode('data: x\n\n'))
+    await new Promise(r => setTimeout(r, 120))
+    await writer.close()
+    await drain
+
+    const all = chunks.join('')
+    expect(all).toContain('data: x\n\n')
+    expect(all).toMatch(/: keepalive\n\n/)
+    expect((all.match(/: keepalive\n\n/g) ?? []).length).toBeGreaterThanOrEqual(1)
   })
 })
