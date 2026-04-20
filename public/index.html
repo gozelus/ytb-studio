@@ -175,6 +175,10 @@
     .prep-meta { font-family:'JetBrains Mono', monospace; color:var(--subtle);
       font-size:12px; text-align:center; margin-top:4px; }
     .step-list { width:380px; max-width:85vw; margin-top:6px; }
+    .prep-fallback-banner { width:380px; max-width:85vw; font-size:12px;
+      color:var(--warn); font-family:'JetBrains Mono', monospace;
+      margin-top:8px; letter-spacing:.2px; }
+    .prep-fallback-banner[hidden] { display:none; }
     .gemini-tip { width:380px; max-width:85vw; font-size:12px; color:var(--subtle);
       font-family:'JetBrains Mono', monospace; letter-spacing:.3px;
       margin-top:4px; opacity:1; transition:opacity .4s; }
@@ -392,6 +396,7 @@
           <div class="step-row pending" data-step="3"><span class="dot"></span><span class="step-t">下载字幕</span><span class="step-meta" id="m3"></span></div>
           <div class="step-row pending" data-step="4"><span class="dot"></span><span class="step-t">唤醒 Gemini</span><span class="step-meta" id="m4"></span></div>
         </div>
+        <div id="prepFallbackBanner" class="prep-fallback-banner" hidden>⚠ 将使用 Gemini 直读：由 Google 自己访问视频，不经我们的服务器</div>
         <div id="geminiTip" class="gemini-tip" hidden></div>
         <div id="geminiTimer" class="gemini-timer" hidden></div>
       </div>

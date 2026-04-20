@@ -124,7 +124,8 @@ async function runInspect(url) {
   $('m1').textContent = data.channel ? `${fmtDur(data.durationSec)} · ${data.channel}` : '—'
   doneStep(1); activateStep(2)
   setStatus('解析字幕')
-  $('m2').textContent = `发现 ${data.tracks.length} 条`
+  $('m2').textContent = state.geminiFallbackReason ? 'AI 直读' : `发现 ${data.tracks.length} 条`
+  if (state.geminiFallbackReason) $('prepFallbackBanner').hidden = false
   doneStep(2)
 
   showPicker(data)
@@ -132,17 +133,15 @@ async function runInspect(url) {
 
 // ---------- Picker ----------
 function showPicker(data) {
+  if (state.geminiFallbackReason) {
+    pickTrack('gemini.direct')
+    return
+  }
   showView('pickView')
   setStatus('等待选择字幕')
-  if (state.geminiFallbackReason) {
-    $('pickTitle').textContent = '(视频信息暂不可用)'
-    $('pickMeta').textContent = `共 ${data.tracks.length} 条字幕`
-    $('geminiWarning').textContent = '⚠ 无法从 YouTube 抓取视频信息（部署在数据中心 IP，被 YouTube 限流）。将使用 Gemini 直读模式：由 Google 自己访问视频，不经我们的服务器。'
-  } else {
-    $('pickTitle').textContent = data.title
-    $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
-    $('geminiWarning').textContent = ''
-  }
+  $('pickTitle').textContent = data.title
+  $('pickMeta').textContent = `${fmtDur(data.durationSec)} · 共 ${data.tracks.length} 条字幕`
+  $('geminiWarning').textContent = ''
   const list = $('capList'); list.innerHTML = ''
   const sorted = [...data.tracks].sort((a, b) => (a.kind === 'manual' ? -1 : 1))
   sorted.forEach((t, i) => {
@@ -475,6 +474,7 @@ function resetRun() {
   state.geminiFallbackReason = null
   renderRailReq()
   $('geminiWarning').textContent = ''
+  $('prepFallbackBanner').hidden = true
   state.articleEnded = false
   state.aborter = null
   $('hintErr').textContent = ''
