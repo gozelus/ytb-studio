@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from '../src/gemini'
 
 function mockFetch(impl: (req: Request) => Promise<Response> | Response) {
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    const req = input instanceof Request ? input : new Request(input as any)
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const req = input instanceof Request ? input : new Request(input as string, init)
     return impl(req)
   }))
 }
@@ -17,7 +17,8 @@ describe('countTokens', () => {
   it('POSTs to :countTokens and returns token count', async () => {
     mockFetch(async req => {
       expect(req.url).toContain(':countTokens')
-      expect(req.url).toContain('key=fake')
+      expect(req.url).not.toContain('key=')
+      expect(req.headers.get('x-goog-api-key')).toBe('fake')
       return new Response(JSON.stringify({ totalTokens: 42 }), { status: 200 })
     })
     const n = await countTokens(env, 'hello world')
