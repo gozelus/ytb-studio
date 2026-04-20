@@ -7,15 +7,18 @@
  */
 
 import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
-import { countTokens, streamGenerate, keepaliveTransform, GeminiError } from './gemini'
-import type { Part } from './gemini'
+import { countPromptTokens, streamChat, keepaliveTransform, LlmError, loadLlmConfig } from './llm'
 import { buildPrompt, buildPromptForVideo, PROMPT_VERSION } from './prompt'
 import { createNdjsonParser } from './parser'
 import { log, logError, newReqId } from './log'
 import type { ErrorCode, Mode, StreamEvent } from './types'
 
 export interface Env {
-  GEMINI_API_KEY: string
+  LLM_PROVIDER?: string
+  LLM_MODEL?: string
+  LLM_API_KEY?: string
+  LLM_BASE_URL?: string
+  GEMINI_API_KEY?: string
   GEMINI_MODEL?: string
   ASSETS: Fetcher
 }
@@ -48,19 +51,20 @@ async function inspect(request: Request, env: Env): Promise<Response> {
     log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
 
+    const cfg = loadLlmConfig(env)
     const tracks = await Promise.all(info.tracks.map(async t => {
       try {
         const res = await fetch(t.baseUrl, { signal: request.signal })
         if (!res.ok) throw new Error(`timedtext status ${res.status}`)
         const xml = await res.text()
         const transcript = timedTextToTranscript(xml)
-        const tokens = await countTokens(env, transcript, request.signal)
+        const tokens = await countPromptTokens(cfg, transcript, request.signal)
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens }
       } catch (err) {
         // Auth failures are fatal for all tracks — re-throw so the outer catch returns 502.
         // All other errors degrade gracefully: return tokens:0 so the track is still listed.
-        if (err instanceof GeminiError && err.code === 'GEMINI_AUTH') throw err
-        const code = err instanceof GeminiError ? err.code : 'INTERNAL'
+        if (err instanceof LlmError && err.code === 'LLM_AUTH') throw err
+        const code = err instanceof LlmError ? err.code : 'INTERNAL'
         logError({ reqId, route: '/api/inspect', phase: 'inspect.track.error', trackId: t.id, code, err: String(err) })
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens: 0 }
       }
@@ -83,7 +87,7 @@ async function inspect(request: Request, env: Env): Promise<Response> {
       })
     }
     const code: ErrorCode = err instanceof YoutubeError ? err.code
-      : err instanceof GeminiError ? err.code
+      : err instanceof LlmError ? err.code
       : 'INTERNAL'
     logError({ reqId, phase: 'inspect.error', code, durMs: Date.now() - started, err: String(err) })
     return json(code === 'VIDEO_NOT_FOUND' ? 404 : code === 'NO_CAPTIONS' ? 404 : code === 'INVALID_URL' ? 400 : 502, { reqId, error: code })
@@ -128,6 +132,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
     return json(code === 'VIDEO_NOT_FOUND' ? 404 : 502, { reqId, error: code })
   }
 
+  const cfg = loadLlmConfig(env)
   const prompt = buildPrompt(mode, { videoId, title, channel, durationSec }, transcript)
 
   // 15 s keepalive interval is half of CF's 30 s idle stream timeout.
@@ -142,7 +147,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
     let events = 0
     try {
       await writeEvent({ type: 'meta', reqId, title, subtitle: channel, durationSec })
-      // Gemini's ndjson output includes its own meta and end events; suppress them here and
+      // LLM ndjson output includes its own meta and end events; suppress them here and
       // emit our own so the client sees exactly one meta (first, with reqId) and one end (last).
       const parser = createNdjsonParser(e => {
         if (e.type === 'meta') return
@@ -150,15 +155,15 @@ async function generate(request: Request, env: Env): Promise<Response> {
         writeEvent(e)
         events++
       })
-      for await (const chunk of streamGenerate(env, [{ text: prompt }], request.signal)) {
-        if (firstChunk) { log({ reqId, phase: 'gemini.first', durMs: Date.now() - started }); firstChunk = false }
+      for await (const chunk of streamChat(cfg, prompt, request.signal)) {
+        if (firstChunk) { log({ reqId, phase: 'llm.first', durMs: Date.now() - started }); firstChunk = false }
         parser.feed(chunk)
       }
       parser.end()
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
-      const code: ErrorCode = err instanceof GeminiError ? err.code : 'GEMINI_STREAM_DROP'
+      const code: ErrorCode = err instanceof LlmError ? err.code : 'LLM_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
     } finally {
@@ -184,12 +189,8 @@ async function generateViaFileData(
   mode: Mode,
   started: number,
 ): Promise<Response> {
-  const fileUri = `https://www.youtube.com/watch?v=${videoId}`
+  const cfg = loadLlmConfig(env)
   const prompt = buildPromptForVideo(mode)
-  const parts: Part[] = [
-    { fileData: { fileUri } },  // omit mimeType: Gemini auto-detects YouTube URLs; 'video/*' causes 400
-    { text: prompt },
-  ]
 
   log({ reqId, route: '/api/generate', phase: 'gemini.direct.start', videoId, mode })
 
@@ -204,23 +205,21 @@ async function generateViaFileData(
     let firstChunk = true
     let events = 0
     try {
-      // Placeholder meta so the UI renders immediately. Gemini's meta event is passed through
-      // but the frontend currently drops duplicate meta events (title update is future work).
       await writeEvent({ type: 'meta', reqId, title: `YouTube · ${videoId}`, subtitle: '', durationSec: 0 })
       const parser = createNdjsonParser(e => {
-        if (e.type === 'end') return   // we send our own end
-        writeEvent(e)                  // let Gemini's meta through so the real title reaches the client
+        if (e.type === 'end') return
+        writeEvent(e)
         events++
       })
-      for await (const chunk of streamGenerate(env, parts, request.signal)) {
-        if (firstChunk) { log({ reqId, phase: 'gemini.first', durMs: Date.now() - started }); firstChunk = false }
+      for await (const chunk of streamChat(cfg, prompt, request.signal)) {
+        if (firstChunk) { log({ reqId, phase: 'llm.first', durMs: Date.now() - started }); firstChunk = false }
         parser.feed(chunk)
       }
       parser.end()
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
-      const code: ErrorCode = err instanceof GeminiError ? err.code : 'GEMINI_STREAM_DROP'
+      const code: ErrorCode = err instanceof LlmError ? err.code : 'LLM_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
     } finally {
