@@ -20,8 +20,6 @@
  */
 
 import type { CaptionTrack } from './types'
-import { fetchViaSocks5 } from './proxy'
-import type { ProxyConfig } from './proxy'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/
 
@@ -95,8 +93,8 @@ export function extractVideoInfo(html: string) {
  * Throws YOUTUBE_BLOCKED if blocked or if the page returns no playerResponse.
  * If proxy is provided, the watch-page fetch is routed through it.
  */
-export async function fetchVideoInfo(videoId: string, signal?: AbortSignal, proxy?: ProxyConfig) {
-  const html = await fetchWatchPage(videoId, signal, proxy)
+export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
+  const html = await fetchWatchPage(videoId, signal)
   const info = extractVideoInfo(html)
   // Anti-scrape pages occasionally match PR_REGEX but yield an empty PlayerResponse
   // with no videoDetails.videoId; treat both null and empty-id as blocked.
@@ -168,30 +166,20 @@ const WATCH_HEADERS: Record<string, string> = {
 
 /**
  * Fetches the YouTube watch page with a full Chrome 131 browser fingerprint.
- * If proxy is provided the request is routed through the SOCKS5 pool; otherwise
- * direct fetch is used (which is often blocked on CF edge IPs).
+ * CF edge IPs are typically blocked by YouTube; YOUTUBE_BLOCKED triggers the
+ * Gemini fileData fallback in the caller.
  */
-export async function fetchWatchPage(videoId: string, signal?: AbortSignal, proxy?: ProxyConfig): Promise<string> {
+export async function fetchWatchPage(videoId: string, signal?: AbortSignal): Promise<string> {
   const url = `https://www.youtube.com/watch?v=${videoId}`
-  let res: Response
-  if (proxy) {
-    res = await fetchViaSocks5(url, proxy, { headers: WATCH_HEADERS, signal })
-  } else {
-    res = await fetch(url, { headers: WATCH_HEADERS, signal })
-  }
-  console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status, viaProxy: !!proxy }))
+  const res = await fetch(url, { headers: WATCH_HEADERS, signal })
+  console.log(JSON.stringify({ phase: 'youtube.watch.status', videoId, status: res.status }))
   if (!res.ok) throw new YoutubeError(res.status === 404 ? 'VIDEO_NOT_FOUND' : 'YOUTUBE_BLOCKED')
   return await res.text()
 }
 
-/** Fetches raw timed-text XML from a caption track's baseUrl. Routed via proxy if provided. */
-export async function fetchTimedText(baseUrl: string, signal?: AbortSignal, proxy?: ProxyConfig): Promise<string> {
-  let res: Response
-  if (proxy) {
-    res = await fetchViaSocks5(baseUrl, proxy, { signal })
-  } else {
-    res = await fetch(baseUrl, { signal })
-  }
+/** Fetches raw timed-text XML from a caption track's baseUrl. */
+export async function fetchTimedText(baseUrl: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(baseUrl, { signal })
   if (!res.ok) throw new YoutubeError('YOUTUBE_BLOCKED')
   return await res.text()
 }

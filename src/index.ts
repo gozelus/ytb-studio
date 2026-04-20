@@ -8,21 +8,14 @@
 
 import { parseVideoId, fetchVideoInfo, fetchTimedText, timedTextToTranscript, YoutubeError } from './youtube'
 import { countPromptTokens, streamChat, keepaliveTransform, LlmError, loadLlmConfig } from './llm'
-import { loadProxyConfig } from './proxy'
 import { buildPrompt, buildPromptForVideo, PROMPT_VERSION } from './prompt'
 import { createNdjsonParser } from './parser'
 import { log, logError, newReqId } from './log'
 import type { ErrorCode, Mode, StreamEvent } from './types'
 
 export interface Env {
-  LLM_PROVIDER?: string
-  LLM_MODEL?: string
-  LLM_API_KEY?: string
-  LLM_BASE_URL?: string
   GEMINI_API_KEY?: string
   GEMINI_MODEL?: string
-  PROXY_URLS?: string
-  PROXY_URL?: string
   ASSETS: Fetcher
 }
 
@@ -48,24 +41,21 @@ async function inspect(request: Request, env: Env): Promise<Response> {
   const videoId = parseVideoId(body.url ?? '')
   if (!videoId) { log({ reqId, route: '/api/inspect', phase: 'invalid_url' }); return json(400, { reqId, error: 'INVALID_URL' }) }
 
-  const proxy = loadProxyConfig(env)
   const cfg = loadLlmConfig(env)
-  log({ reqId, route: '/api/inspect', phase: 'start', videoId, viaProxy: !!proxy })
+  log({ reqId, route: '/api/inspect', phase: 'start', videoId })
   try {
-    const info = await fetchVideoInfo(videoId, request.signal, proxy ?? undefined)
+    const info = await fetchVideoInfo(videoId, request.signal)
     log({ reqId, route: '/api/inspect', phase: 'youtube.fetch', durMs: Date.now() - started })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
 
     const tracks = await Promise.all(info.tracks.map(async t => {
       try {
-        const xml = await fetchTimedText(t.baseUrl, request.signal, proxy ?? undefined)
+        const xml = await fetchTimedText(t.baseUrl, request.signal)
         const transcript = timedTextToTranscript(xml)
         const tokens = await countPromptTokens(cfg, transcript, request.signal)
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens }
       } catch (err) {
-        // Auth failures are fatal for all tracks — re-throw so the outer catch returns 502.
-        // All other errors degrade gracefully: return tokens:0 so the track is still listed.
-        if (err instanceof LlmError && err.code === 'LLM_AUTH') throw err
+        if (err instanceof LlmError && err.code === 'GEMINI_AUTH') throw err
         const code = err instanceof LlmError ? err.code : 'INTERNAL'
         logError({ reqId, route: '/api/inspect', phase: 'inspect.track.error', trackId: t.id, code, err: String(err) })
         return { id: t.id, lang: t.lang, label: t.label, kind: t.kind, tokens: 0 }
@@ -75,24 +65,18 @@ async function inspect(request: Request, env: Env): Promise<Response> {
     log({ reqId, route: '/api/inspect', phase: 'done', durMs: Date.now() - started, trackCount: tracks.length })
     return json(200, { reqId, videoId: info.videoId, title: info.title, channel: info.channel, durationSec: info.durationSec, tracks })
   } catch (err) {
-    // YOUTUBE_BLOCKED routing depends on the LLM provider:
-    // - google: fall back to gemini.direct (Gemini fetches the video directly via Google's IPs)
-    // - others: hard error PROXY_REQUIRED — the deployer must configure PROXY_URLS
+    // CF edge IPs are blocked by YouTube — fall back to Gemini fileData path.
+    // Gemini fetches the video using Google's own IPs, bypassing the block entirely.
     if (err instanceof YoutubeError && err.code === 'YOUTUBE_BLOCKED') {
-      const provider = cfg.provider
-      if (provider === 'google') {
-        log({ reqId, route: '/api/inspect', phase: 'gemini.fallback', videoId, durMs: Date.now() - started })
-        return json(200, {
-          reqId, videoId,
-          title: `YouTube · ${videoId}`,
-          channel: null,
-          durationSec: null,
-          tracks: [{ id: 'gemini.direct', lang: 'auto', label: 'AI 直读（未获取原始字幕）', kind: 'auto', tokens: 0 }],
-          gemini_fallback_reason: 'youtube_blocked_no_proxy',
-        })
-      }
-      logError({ reqId, phase: 'inspect.proxy_required', provider, durMs: Date.now() - started, err: String(err) })
-      return json(502, { reqId, error: 'PROXY_REQUIRED' as ErrorCode })
+      log({ reqId, route: '/api/inspect', phase: 'gemini.fallback', videoId, durMs: Date.now() - started })
+      return json(200, {
+        reqId, videoId,
+        title: `YouTube · ${videoId}`,
+        channel: null,
+        durationSec: null,
+        tracks: [{ id: 'gemini.direct', lang: 'auto', label: 'AI 直读（未获取原始字幕）', kind: 'auto', tokens: 0 }],
+        gemini_fallback_reason: 'youtube_blocked',
+      })
     }
     const code: ErrorCode = err instanceof YoutubeError ? err.code
       : err instanceof LlmError ? err.code
@@ -116,25 +100,24 @@ async function generate(request: Request, env: Env): Promise<Response> {
   const mode: Mode = body.mode === 'faithful' ? 'faithful' : 'rewrite'
   if (!videoId || !body.trackId) return json(400, { reqId, error: 'INVALID_URL' })
 
-  const proxy = loadProxyConfig(env)
   const cfg = loadLlmConfig(env)
   log({ reqId, route: '/api/generate', phase: 'start', videoId, mode, trackId: body.trackId, promptVer: PROMPT_VERSION })
 
-  // gemini.direct: Gemini fetches the video itself via fileData (only valid for google provider)
+  // gemini.direct: Gemini fetches the video itself via fileData using Google's own IPs
   if (body.trackId === 'gemini.direct') {
     return generateViaGeminiDirect(request, cfg, reqId, videoId, mode, started)
   }
 
   let title: string, channel: string, durationSec: number, transcript: string
   try {
-    const info = await fetchVideoInfo(videoId, request.signal, proxy ?? undefined)
+    const info = await fetchVideoInfo(videoId, request.signal)
     if (!info.videoId) return json(404, { reqId, error: 'VIDEO_NOT_FOUND' })
     if (info.tracks.length === 0) return json(404, { reqId, error: 'NO_CAPTIONS' })
     const track = info.tracks.find(t => t.id === body.trackId)
     if (!track) return json(404, { reqId, error: 'NO_CAPTIONS' })
     title = info.title; channel = info.channel; durationSec = info.durationSec
     log({ reqId, phase: 'youtube.fetch', durMs: Date.now() - started })
-    const captionXml = await fetchTimedText(track.baseUrl, request.signal, proxy ?? undefined)
+    const captionXml = await fetchTimedText(track.baseUrl, request.signal)
     transcript = timedTextToTranscript(captionXml)
     log({ reqId, phase: 'caption.download', bytes: captionXml.length, chars: transcript.length })
   } catch (err) {
@@ -144,7 +127,6 @@ async function generate(request: Request, env: Env): Promise<Response> {
   }
   const prompt = buildPrompt(mode, { videoId, title, channel, durationSec }, transcript)
 
-  // 15 s keepalive interval is half of CF's 30 s idle stream timeout.
   const ka = keepaliveTransform(15_000)
   const writer = ka.writable.getWriter()
   const enc = new TextEncoder()
@@ -156,8 +138,6 @@ async function generate(request: Request, env: Env): Promise<Response> {
     let events = 0
     try {
       await writeEvent({ type: 'meta', reqId, title, subtitle: channel, durationSec })
-      // LLM ndjson output includes its own meta and end events; suppress them here and
-      // emit our own so the client sees exactly one meta (first, with reqId) and one end (last).
       const parser = createNdjsonParser(e => {
         if (e.type === 'meta') return
         if (e.type === 'end') return
@@ -172,7 +152,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
-      const code: ErrorCode = err instanceof LlmError ? err.code : 'LLM_STREAM_DROP'
+      const code: ErrorCode = err instanceof LlmError ? err.code : 'GEMINI_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
     } finally {
@@ -191,8 +171,8 @@ async function generate(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * gemini.direct path: passes the YouTube URL as a Gemini fileData part so Google's
- * servers fetch the video. Only valid when LLM_PROVIDER=google (Gemini API).
+ * Gemini fileData path: embeds the YouTube URL in the prompt so Gemini fetches
+ * the video using Google's own IPs. No separate caption download needed.
  */
 async function generateViaGeminiDirect(
   request: Request,
@@ -217,11 +197,9 @@ async function generateViaGeminiDirect(
     try {
       const parser = createNdjsonParser(e => {
         if (e.type === 'end') return
-        // Gemini output won't include reqId in its meta; inject it here.
         writeEvent(e.type === 'meta' ? { ...e, reqId } : e)
         events++
       })
-      // Gemini-specific: embed the YouTube URL directly in the prompt for fileData inference
       const fileDataPrompt = `https://www.youtube.com/watch?v=${videoId}\n\n${prompt}`
       for await (const chunk of streamChat(cfg, fileDataPrompt, request.signal)) {
         if (firstChunk) {
@@ -234,7 +212,7 @@ async function generateViaGeminiDirect(
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
-      const code: ErrorCode = err instanceof LlmError ? err.code : 'LLM_STREAM_DROP'
+      const code: ErrorCode = err instanceof LlmError ? err.code : 'GEMINI_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
     } finally {
