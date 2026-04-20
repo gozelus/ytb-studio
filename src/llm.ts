@@ -170,8 +170,7 @@ async function retryingFetch(
       // RESOURCE_EXHAUSTED = daily quota gone; no point retrying.
       const body429 = await res.text().catch(() => '')
       if (body429.includes('RESOURCE_EXHAUSTED')) {
-        const code = provider === 'google' ? 'GEMINI_QUOTA' : 'LLM_QUOTA'
-        throw new LlmError(code, `quota exhausted: ${body429.slice(0, 200)}`)
+        throw new LlmError('LLM_QUOTA', `quota exhausted: ${body429.slice(0, 200)}`)
       }
       if (attempt429 < retries429) {
         await sleepFn(delay)
@@ -187,12 +186,15 @@ async function retryingFetch(
       attempt5xx++; continue
     }
     const body = await res.text().catch(() => '')
-    // Google-specific 400 classification: safety filter vs. unsupported video format.
+    // Google-specific 400 classification: auth → safety → video format → unknown.
     if (provider === 'google' && res.status === 400) {
-      if (body.includes('SAFETY')) throw new LlmError('GEMINI_SAFETY', body.slice(0, 200))
-      if (body.includes('API key not valid') || body.includes('API_KEY_INVALID'))
+      if (/API key not valid|API_KEY_INVALID|invalid authentication/i.test(body))
         throw new LlmError('LLM_AUTH', body.slice(0, 200))
-      throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
+      if (/SAFETY|blocked|blockReason/i.test(body))
+        throw new LlmError('LLM_SAFETY', body.slice(0, 200))
+      if (/INVALID_ARGUMENT.*fileData|video|cannot be processed/i.test(body))
+        throw new LlmError('LLM_VIDEO_UNSUPPORTED', `status 400: ${body.slice(0, 200)}`)
+      throw new LlmError('LLM_TIMEOUT', `status 400: ${body.slice(0, 200)}`)
     }
     throw new LlmError('LLM_TIMEOUT', `status ${res.status}: ${body.slice(0, 300)}`)
   }
