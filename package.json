@@ -1,7 +1,7 @@
 {
   "name": "ytb-studio",
   "version": "1.0.0",
-  "description": "YouTube Studio 相关项目，初始化阶段。需求文档后续补充。",
+  "description": "Turn a YouTube talk into a readable Chinese article.",
   "main": "index.js",
   "directories": {
     "doc": "docs"
