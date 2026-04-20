@@ -38,6 +38,7 @@ export type ErrorCode =
   | 'VIDEO_NOT_FOUND'
   | 'NO_CAPTIONS'
   | 'YOUTUBE_BLOCKED'
+  | 'PROXY_REQUIRED'
   | 'LLM_AUTH'
   | 'LLM_RATE_LIMIT'
   | 'LLM_QUOTA'
