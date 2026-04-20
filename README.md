@@ -10,12 +10,18 @@
 wrangler secret put GEMINI_API_KEY
 ```
 
-可选：指定模型（默认 `gemini-2.5-flash`）：
+### 模型配置（鲁棒推荐）
+
+默认自动按优先级级联 fallback：`gemini-2.5-flash → gemini-2.5-flash-lite → gemini-2.5-pro`
 
 ```toml
 [vars]
-GEMINI_MODEL = "gemini-2.5-flash"   # 或 gemini-2.5-pro
+GEMINI_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro"
 ```
+
+当前 model 503 / 过载 / quota 时自动切换下一个，用户无感。顺序是"快 → 便宜 → 高能"，大多数用户不需要改。
+
+单模型兼容：旧的 `GEMINI_MODEL = "gemini-2.5-flash"` 仍然有效（只用该单一模型）。
 
 > **需要付费 Gemini tier**：免费档限 20 req/day，不够正常使用。
 > 在 Google AI Studio 开启 billing 后同一个 key 即解除限制。

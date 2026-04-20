@@ -12,14 +12,20 @@ function mockFetch(impl: (req: Request) => Promise<Response> | Response) {
 // ── loadLlmConfig ─────────────────────────────────────────────────────────────
 
 describe('loadLlmConfig', () => {
-  it('reads GEMINI_API_KEY', () => {
+  it('reads GEMINI_API_KEY with single GEMINI_MODEL', () => {
     const cfg = loadLlmConfig({ GEMINI_API_KEY: 'gk', GEMINI_MODEL: 'gemini-2.5-pro' })
-    expect(cfg).toMatchObject({ model: 'gemini-2.5-pro', apiKey: 'gk' })
+    expect(cfg).toMatchObject({ models: ['gemini-2.5-pro'], apiKey: 'gk' })
   })
 
-  it('falls back to default model when GEMINI_MODEL omitted', () => {
+  it('reads GEMINI_MODELS as comma-separated list (takes precedence over GEMINI_MODEL)', () => {
+    const cfg = loadLlmConfig({ GEMINI_API_KEY: 'gk', GEMINI_MODELS: 'gemini-2.5-flash,gemini-2.5-pro' })
+    expect(cfg.models).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro'])
+  })
+
+  it('falls back to default 3-model list when neither GEMINI_MODELS nor GEMINI_MODEL set', () => {
     const cfg = loadLlmConfig({ GEMINI_API_KEY: 'gk' })
-    expect(cfg.model).toBe('gemini-2.5-flash')
+    expect(cfg.models[0]).toBe('gemini-2.5-flash')
+    expect(cfg.models.length).toBeGreaterThan(1)
   })
 
   it('throws GEMINI_AUTH when no key configured', () => {
@@ -31,7 +37,7 @@ describe('loadLlmConfig', () => {
 // ── countPromptTokens ─────────────────────────────────────────────────────────
 
 describe('countPromptTokens', () => {
-  const cfg: LlmConfig = { model: 'gemini-2.5-flash', apiKey: 'fake' }
+  const cfg: LlmConfig = { models: ['gemini-2.5-flash'], apiKey: 'fake' }
 
   beforeEach(() => vi.unstubAllGlobals())
   afterEach(() => vi.unstubAllGlobals())
@@ -106,7 +112,7 @@ describe('countPromptTokens', () => {
 // ── streamChat: Gemini error codes ───────────────────────────────────────────
 
 describe('streamChat — Gemini error codes', () => {
-  const cfg: LlmConfig = { model: 'gemini-2.5-flash', apiKey: 'fake' }
+  const cfg: LlmConfig = { models: ['gemini-2.5-flash'], apiKey: 'fake' }
 
   beforeEach(() => vi.unstubAllGlobals())
   afterEach(() => vi.unstubAllGlobals())
@@ -175,7 +181,7 @@ describe('streamChat — Gemini error codes', () => {
 // ── streamChat: SSE streaming ─────────────────────────────────────────────────
 
 describe('streamChat', () => {
-  const cfg: LlmConfig = { model: 'gemini-2.5-flash', apiKey: 'fake' }
+  const cfg: LlmConfig = { models: ['gemini-2.5-flash'], apiKey: 'fake' }
 
   beforeEach(() => vi.unstubAllGlobals())
   afterEach(() => vi.unstubAllGlobals())
@@ -318,6 +324,91 @@ describe('streamChat', () => {
     expect(parts).toHaveLength(1)
     expect(parts[0]).toMatchObject({ text: 'hello gemini' })
     expect(parts[0]).not.toHaveProperty('fileData')
+  })
+})
+
+// ── streamChat: model fallback ────────────────────────────────────────────────
+
+describe('streamChat — model fallback', () => {
+  beforeEach(() => vi.unstubAllGlobals())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('falls back to second model when first throws GEMINI_OVERLOADED', async () => {
+    const models: string[] = []
+    // Use SSE-body error (HTTP 200) to avoid retryingFetch's real sleep delays
+    mockFetch(req => {
+      const model = new URL(req.url).pathname.split('/models/')[1]?.split(':')[0] ?? ''
+      models.push(model)
+      if (model === 'gemini-2.5-flash')
+        return new Response(
+          'data: {"error":{"code":503,"status":"UNAVAILABLE","message":"overloaded"}}\n\n',
+          { status: 200 },
+        )
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+        { status: 200 },
+      )
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, 'p')) chunks.push(c)
+    expect(chunks.join('')).toBe('ok')
+    expect(models[0]).toBe('gemini-2.5-flash')
+    expect(models[1]).toBe('gemini-2.5-flash-lite')
+  })
+
+  it('does NOT fall back when first model throws GEMINI_AUTH (non-retryable)', async () => {
+    let attempts = 0
+    mockFetch(() => {
+      attempts++
+      return new Response(
+        '{"error":{"code":400,"status":"API_KEY_INVALID","message":"API key not valid."}}',
+        { status: 400 },
+      )
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_AUTH' })
+    expect(attempts).toBe(1)
+  })
+
+  it('throws last model error when all models are exhausted', async () => {
+    let attempt = 0
+    // Use SSE-body error (HTTP 200) to avoid retryingFetch's real sleep delays
+    mockFetch(() => {
+      attempt++
+      return new Response(
+        'data: {"error":{"code":503,"status":"UNAVAILABLE","message":"overloaded"}}\n\n',
+        { status: 200 },
+      )
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'], apiKey: 'fake' }
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
+    expect(attempt).toBe(3) // one fetch per model, each fails immediately
+  })
+
+  it('does NOT fall back mid-stream after first token received', async () => {
+    let callCount = 0
+    mockFetch(() => {
+      callCount++
+      // First call: yields a token then sends a 503 error frame in the stream
+      const enc = new TextEncoder()
+      const body = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}\n\n'))
+          ctrl.enqueue(enc.encode('data: {"error":{"code":503,"status":"UNAVAILABLE","message":"overloaded"}}\n\n'))
+          ctrl.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const gen = streamChat(cfg, 'p')
+    expect((await gen.next()).value).toBe('hello')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
+    // Only one fetch call — no fallback after first token
+    expect(callCount).toBe(1)
   })
 })
 

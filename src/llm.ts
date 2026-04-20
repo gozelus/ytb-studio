@@ -8,13 +8,14 @@
  */
 
 import type { ErrorCode } from './types'
+import { log } from './log'
 
 export class LlmError extends Error {
   constructor(public code: ErrorCode, message?: string) { super(message ?? code) }
 }
 
 export interface LlmConfig {
-  model: string
+  models: string[]
   apiKey: string
 }
 
@@ -22,19 +23,19 @@ export type Part = { text: string } | { fileData: { fileUri: string; mimeType?: 
 
 interface Env {
   GEMINI_API_KEY?: string
+  GEMINI_MODELS?: string
   GEMINI_MODEL?: string
 }
 
-const DEFAULT_MODEL = 'gemini-2.5-flash'
+const DEFAULT_MODELS = 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro'
 
 export function loadLlmConfig(env: Env): LlmConfig {
   if (!env.GEMINI_API_KEY) {
     throw new LlmError('GEMINI_AUTH', 'No Gemini API key configured (set GEMINI_API_KEY)')
   }
-  return {
-    model: env.GEMINI_MODEL ?? DEFAULT_MODEL,
-    apiKey: env.GEMINI_API_KEY,
-  }
+  const modelsStr = env.GEMINI_MODELS ?? env.GEMINI_MODEL ?? DEFAULT_MODELS
+  const models = modelsStr.split(',').map(s => s.trim()).filter(Boolean)
+  return { models, apiKey: env.GEMINI_API_KEY }
 }
 
 /**
@@ -48,7 +49,7 @@ export async function countPromptTokens(
   opts: { sleepFn?: (ms: number) => Promise<void> } = {},
 ): Promise<number> {
   const base = 'https://generativelanguage.googleapis.com/v1beta'
-  const res = await retryingFetch(`${base}/models/${cfg.model}:countTokens`, {
+  const res = await retryingFetch(`${base}/models/${cfg.models[0]}:countTokens`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
     body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
@@ -58,7 +59,7 @@ export async function countPromptTokens(
   return data.totalTokens ?? 0
 }
 
-/** Streams the Gemini response as raw text increments. */
+/** Streams the Gemini response as raw text increments, with cascading model fallback. */
 export async function* streamChat(
   cfg: LlmConfig,
   partsOrPrompt: Part[] | string,
@@ -71,7 +72,29 @@ export async function* streamChat(
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
   const parts: Part[] = typeof partsOrPrompt === 'string' ? [{ text: partsOrPrompt }] : partsOrPrompt
-  yield* streamGoogle(cfg, parts, signal, opts)
+  const fallbackTriggers = new Set<ErrorCode>(['GEMINI_OVERLOADED', 'GEMINI_RATE_LIMIT', 'GEMINI_QUOTA'])
+
+  for (let i = 0; i < cfg.models.length; i++) {
+    const model = cfg.models[i]!
+    log({ phase: 'llm.try_model', model, attempt: i + 1 })
+    let firstTokenSeen = false
+    try {
+      for await (const chunk of streamGoogle({ model, apiKey: cfg.apiKey }, parts, signal, opts)) {
+        if (!firstTokenSeen) {
+          firstTokenSeen = true
+          log({ phase: 'llm.accepted', model, attempt: i + 1 })
+        }
+        yield chunk
+      }
+      return
+    } catch (err) {
+      if (!firstTokenSeen && err instanceof LlmError && fallbackTriggers.has(err.code) && i < cfg.models.length - 1) {
+        log({ phase: 'llm.fallback', from: model, to: cfg.models[i + 1], reason: err.code })
+        continue
+      }
+      throw err
+    }
+  }
 }
 
 // ── keepalive ────────────────────────────────────────────────────────────────
@@ -233,7 +256,7 @@ async function* consumeSSE(
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 
 async function* streamGoogle(
-  cfg: LlmConfig,
+  cfg: { model: string; apiKey: string },
   parts: Part[],
   signal?: AbortSignal,
   opts: { _idleTimeoutMs?: number; _heartbeatIntervalMs?: number; onHeartbeat?: (idleSeconds: number) => void } = {},
