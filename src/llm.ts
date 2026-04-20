@@ -72,7 +72,14 @@ export async function* streamChat(
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
   const parts: Part[] = typeof partsOrPrompt === 'string' ? [{ text: partsOrPrompt }] : partsOrPrompt
-  const fallbackTriggers = new Set<ErrorCode>(['GEMINI_OVERLOADED', 'GEMINI_RATE_LIMIT', 'GEMINI_QUOTA'])
+  const fallbackTriggers = new Set<ErrorCode>([
+    'GEMINI_OVERLOADED',  // 503 overloaded
+    'GEMINI_RATE_LIMIT',  // 429 rate limit
+    'GEMINI_QUOTA',       // 429 quota exhausted (per-model on free tier)
+    'GEMINI_TIMEOUT',     // catch-all transient upstream errors (500/504/unknown 4xx)
+    'GEMINI_STREAM_DROP', // network/stream severed before first token
+    'GEMINI_STALL',       // 120s no tokens before first token — next model may respond
+  ])
 
   for (let i = 0; i < cfg.models.length; i++) {
     const model = cfg.models[i]!
@@ -283,7 +290,11 @@ function extractGoogleText(frame: string): string {
     try {
       const obj = JSON.parse(payload) as {
         error?: { code?: number; status?: string; message?: string }
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+        promptFeedback?: { blockReason?: string }
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> }
+          finishReason?: string
+        }>
       }
       if (obj.error) {
         const { code, status = '', message = '' } = obj.error
@@ -299,9 +310,17 @@ function extractGoogleText(frame: string): string {
           throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', message.slice(0, 200))
         throw new LlmError('GEMINI_TIMEOUT', `stream error ${code}: ${message.slice(0, 200)}`)
       }
-      for (const c of obj.candidates ?? [])
-        for (const p of c.content?.parts ?? [])
-          if (p.text) out.push(p.text)
+      if (obj.promptFeedback?.blockReason)
+        throw new LlmError('GEMINI_SAFETY', `promptFeedback.blockReason=${obj.promptFeedback.blockReason}`)
+      for (const c of obj.candidates ?? []) {
+        const fr = c.finishReason
+        if (fr && fr !== 'STOP' && fr !== 'FINISH_REASON_UNSPECIFIED') {
+          if (fr === 'SAFETY' || fr === 'RECITATION') throw new LlmError('GEMINI_SAFETY', `finishReason=${fr}`)
+          if (fr === 'MAX_TOKENS') throw new LlmError('GEMINI_TIMEOUT', 'output truncated: MAX_TOKENS')
+          throw new LlmError('GEMINI_STREAM_DROP', `finishReason=${fr}`)
+        }
+        for (const p of c.content?.parts ?? []) if (p.text) out.push(p.text)
+      }
     } catch (e) {
       if (e instanceof LlmError) throw e
       /* skip truly malformed frames */
