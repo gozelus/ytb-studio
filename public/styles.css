@@ -70,9 +70,11 @@ body.share-locked .frame { filter:blur(6px); transform:scale(1.01); opacity:.38;
 }
 .hero-title-wrap { text-align:center; }
 .hero .input-wrap { width:560px; max-width:88%; display:flex; gap:10px; }
+/* font-size ≥16px：iOS Safari / iOS Chrome（同 WebKit）在点击 <16px 的输入框时会 auto-zoom，
+   放大动画的 layout shift 会把原生粘贴菜单立即 dismiss — YouTube 链接就贴不进去。 */
 .hero input { flex:1; background:transparent; color:var(--fg);
   border:1px solid var(--border); border-radius:8px; padding:14px 16px;
-  font:15px/1.4 'JetBrains Mono', monospace; transition:border-color .2s; min-width:0; }
+  font:16px/1.4 'JetBrains Mono', monospace; transition:border-color .2s; min-width:0; }
 .hero input:focus { outline:none; border-color:var(--fg); }
 .hero .go { background:var(--accent); color:var(--bg); border:none; cursor:pointer;
   padding:0 24px; border-radius:8px;
@@ -108,9 +110,10 @@ html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--
   color:var(--subtle); }
 .share-title { font-size:24px; font-weight:600; letter-spacing:1.5px; color:var(--fg); }
 .share-input-wrap { width:100%; display:flex; gap:10px; }
+/* font-size ≥16px：同 .hero input，iOS WebKit 点击 <16px 会 auto-zoom 吞掉粘贴菜单。 */
 .share-input-wrap input { flex:1; min-width:0; background:transparent; color:var(--fg);
   border:1px solid var(--border); border-radius:8px; padding:14px 16px;
-  font:15px/1.4 'JetBrains Mono', monospace; transition:border-color .2s; }
+  font:16px/1.4 'JetBrains Mono', monospace; transition:border-color .2s; }
 .share-input-wrap input:focus { outline:none; border-color:var(--fg); }
 .share-input-wrap button { background:var(--accent); color:var(--bg); border:none; cursor:pointer;
   padding:0 24px; border-radius:8px; font:600 14px 'Noto Serif SC', serif; letter-spacing:2px;
@@ -434,7 +437,8 @@ html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--
     width:100%;
     min-height:50px;
     padding:13px 14px;
-    font-size:13px;
+    /* 16px 是 iOS WebKit 抑制点击 auto-zoom 的阈值，别再调低。 */
+    font-size:16px;
   }
   .hero .go {
     width:100%;
