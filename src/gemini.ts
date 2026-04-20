@@ -91,6 +91,11 @@ export async function* streamGenerate(
         if (text) yield text
       }
     }
+    // Flush remaining buffer after stream ends (last frame may lack trailing \n\n)
+    if (buf.trim()) {
+      const text = extractText(buf)
+      if (text) yield text
+    }
   } finally {
     try { reader.cancel() } catch { /* ignore */ }
   }

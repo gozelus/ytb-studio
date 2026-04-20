@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { countTokens, GeminiError } from '../src/gemini'
+import { countTokens, streamGenerate, GeminiError } from '../src/gemini'
 
 function mockFetch(impl: (req: Request) => Promise<Response> | Response) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -48,5 +48,49 @@ describe('countTokens', () => {
     await expect(countTokens(env, 'x', undefined, { sleepFn: async () => {} }))
       .rejects.toMatchObject({ code: 'GEMINI_RATE_LIMIT' })
     expect(attempt).toBe(3)
+  })
+})
+
+describe('streamGenerate', () => {
+  const env = { GEMINI_API_KEY: 'fake', GEMINI_MODEL: 'gemini-2.5-flash' }
+
+  beforeEach(() => vi.unstubAllGlobals())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('yields concatenated text parts from SSE body', async () => {
+    const sse = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"{\\"type\\":"}]}}]}',
+      '',
+      'data: {"candidates":[{"content":{"parts":[{"text":"\\"h2\\",\\"text\\":\\"A\\"}\\n"}]}}]}',
+      '',
+    ].join('\n')
+    mockFetch(() => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+    const chunks: string[] = []
+    for await (const chunk of streamGenerate(env, 'prompt')) chunks.push(chunk)
+    expect(chunks.join('')).toBe('{"type":"h2","text":"A"}\n')
+  })
+
+  it('handles SSE frames split across reader.read() boundaries', async () => {
+    const enc = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"'))
+        ctrl.enqueue(enc.encode('hello"}]}}]}\n\n'))
+        ctrl.close()
+      },
+    })
+    mockFetch(() => new Response(body, { status: 200 }))
+    const chunks: string[] = []
+    for await (const c of streamGenerate(env, 'p')) chunks.push(c)
+    expect(chunks.join('')).toBe('hello')
+  })
+
+  it('refuses to start when signal already aborted', async () => {
+    const ctrl = new AbortController()
+    ctrl.abort()
+    mockFetch(() => new Response('', { status: 200 }))
+    const gen = streamGenerate(env, 'p', ctrl.signal)
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_STREAM_DROP' })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })
