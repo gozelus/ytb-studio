@@ -228,7 +228,7 @@ async function consumeSse(body) {
           enterArticle(ev)
         } else if (!gotMeta && ev.type === 'error') {
           // Error arrived before first meta — still in prep stage; show inline error
-          state.articleEnded = true  // prevent LLM_STREAM_DROP throw at loop exit
+          state.articleEnded = true  // prevent GEMINI_STREAM_DROP throw at loop exit
           showInlineError({ code: ev.code ?? 'INTERNAL', step: 4 })
           return
         } else {
@@ -239,13 +239,13 @@ async function consumeSse(body) {
   } catch (err) {
     if (state.cancelled) return
     if (!gotMeta) throw err
-    showInterrupt('LLM_STREAM_DROP')
+    showInterrupt('GEMINI_STREAM_DROP')
     return
   }
 
   if (state.cancelled) return
-  if (!gotMeta) throw { code: 'LLM_STREAM_DROP' }
-  if (!state.articleEnded) showInterrupt('LLM_STREAM_DROP')
+  if (!gotMeta) throw { code: 'GEMINI_STREAM_DROP' }
+  if (!state.articleEnded) showInterrupt('GEMINI_STREAM_DROP')
 }
 
 // ---------- Article ----------
@@ -339,14 +339,13 @@ const ERROR_COPY = {
   VIDEO_NOT_FOUND: '视频不存在或已删除',
   NO_CAPTIONS: '这个视频没有可用字幕',
   YOUTUBE_BLOCKED: '当前环境无法连接 YouTube（数据中心 IP 常见），请本地运行 npm run dev 或配置代理',
-  PROXY_REQUIRED: '当前部署无法连接 YouTube（需配置代理）。请设置 PROXY_URL，或改用 LLM_PROVIDER=google 启用 Gemini 直读',
-  LLM_AUTH: 'LLM API Key 无效或已过期，请检查部署的 LLM_API_KEY 配置。',
-  LLM_QUOTA: 'LLM 免费额度已用尽。请稍后再试、切换 LLM_PROVIDER、或启用付费计划。',
-  LLM_RATE_LIMIT: 'LLM 当前限流，请 30 秒后重试。',
-  LLM_SAFETY: '内容触发了 LLM 的安全策略，该视频无法处理。',
-  LLM_VIDEO_UNSUPPORTED: '该视频当前 LLM 无法直读（私密 / 年龄限制 / 格式不支持）。请配置 PROXY_URLS 通过字幕路径生成。',
-  LLM_STREAM_DROP: 'LLM 连接中断（通常是网络或超时），请重试。',
-  LLM_TIMEOUT: 'LLM 请求超时，请重试。',
+  GEMINI_AUTH: 'Gemini API Key 无效或已过期，请检查部署的 GEMINI_API_KEY 配置。',
+  GEMINI_QUOTA: 'Gemini 免费额度已用尽（免费档每天仅 20 次）。请为 Gemini key 开启付费计划后重试。',
+  GEMINI_RATE_LIMIT: 'Gemini 当前限流，请 30 秒后重试。',
+  GEMINI_SAFETY: '内容触发了 Gemini 的安全策略，该视频无法处理。',
+  GEMINI_VIDEO_UNSUPPORTED: '该视频 Gemini 无法直读（私密 / 年龄限制 / 格式不支持）。',
+  GEMINI_STREAM_DROP: 'Gemini 连接中断（通常是网络或超时），请重试。',
+  GEMINI_TIMEOUT: 'Gemini 请求超时，请重试。',
   INTERNAL: '内部错误',
 }
 function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知'}）` }
@@ -411,15 +410,10 @@ function showInlineError(err) {
   const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
   const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
   if (!host) return
-  const actionList = err.code === 'PROXY_REQUIRED'
-    ? [
-        { text: '换视频', onClick: backToHero },
-        { text: '查看配置文档', primary: true, onClick: () => window.open('https://github.com/gozelus/ytb-studio#proxy-setup', '_blank') },
-      ]
-    : [
-        { text: '换视频', onClick: backToHero },
-        { text: '重试', primary: true, onClick: retry },
-      ]
+  const actionList = [
+    { text: '换视频', onClick: backToHero },
+    { text: '重试', primary: true, onClick: retry },
+  ]
   ensureInlineActions(host, { msg, list: actionList })
 }
 
