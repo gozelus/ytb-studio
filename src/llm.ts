@@ -61,9 +61,10 @@ export async function* streamChat(
   cfg: LlmConfig,
   prompt: string,
   signal?: AbortSignal,
+  opts: { _idleTimeoutMs?: number } = {},
 ): AsyncGenerator<string> {
   if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted before start')
-  yield* streamGoogle(cfg, prompt, signal)
+  yield* streamGoogle(cfg, prompt, signal, opts._idleTimeoutMs)
 }
 
 // ── keepalive ────────────────────────────────────────────────────────────────
@@ -165,20 +166,37 @@ async function retryingFetch(
   }
 }
 
-/** Shared SSE stream consumer. Buffers reader output, splits on \n\n, delegates text extraction. */
+const IDLE_TIMEOUT_MS = 45_000
+
+/**
+ * Shared SSE stream consumer. Each reader.read() is raced against an idle watchdog;
+ * if no bytes arrive within idleTimeoutMs the generator throws GEMINI_STALL. This
+ * prevents long videos from hanging silently when Gemini stalls mid-generation.
+ */
 async function* consumeSSE(
   res: Response,
   extractFn: (frame: string) => string,
   signal?: AbortSignal,
+  idleTimeoutMs = IDLE_TIMEOUT_MS,
 ): AsyncGenerator<string> {
   if (!res.body) throw new LlmError('GEMINI_STREAM_DROP', 'no body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+
+  // Wraps reader.read() with an idle watchdog timer that cancels cleanly on success.
+  const readOrStall = () => new Promise<ReadableStreamReadResult<Uint8Array>>((res, rej) => {
+    const t = setTimeout(
+      () => rej(new LlmError('GEMINI_STALL', `No tokens from Gemini in ${idleTimeoutMs / 1000}s`)),
+      idleTimeoutMs,
+    )
+    reader.read().then(r => { clearTimeout(t); res(r) }, e => { clearTimeout(t); rej(e) })
+  })
+
   try {
     while (true) {
       if (signal?.aborted) throw new LlmError('GEMINI_STREAM_DROP', 'aborted')
-      const { value, done } = await reader.read()
+      const { value, done } = await readOrStall()
       if (done) break
       buf += decoder.decode(value, { stream: true })
       let idx: number
@@ -196,7 +214,7 @@ async function* consumeSSE(
 
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 
-async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSignal) {
+async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSignal, idleTimeoutMs?: number) {
   const base = 'https://generativelanguage.googleapis.com/v1beta'
   const res = await retryingFetch(`${base}/models/${cfg.model}:streamGenerateContent?alt=sse`, {
     method: 'POST',
@@ -207,7 +225,7 @@ async function* streamGoogle(cfg: LlmConfig, prompt: string, signal?: AbortSigna
     }),
     signal,
   }, { retries429: 2, retries5xx: 1, signal })
-  yield* consumeSSE(res, extractGoogleText, signal)
+  yield* consumeSSE(res, extractGoogleText, signal, idleTimeoutMs)
 }
 
 function extractGoogleText(frame: string): string {
