@@ -89,7 +89,7 @@
     .hero.out { opacity:0; transform:translateY(-12px); pointer-events:none; }
     .hero .h-title {
       font-size:32px; font-weight:600; letter-spacing:2px;
-      background:linear-gradient(90deg,var(--fg) 0%,var(--fg) 30%,var(--accent) 50%,var(--fg) 70%,var(--fg) 100%);
+      background:linear-gradient(90deg,var(--fg) 0%,var(--fg) 30%,#fff 50%,var(--fg) 70%,var(--fg) 100%);
       background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
       -webkit-text-fill-color:transparent; color:transparent;
     }
@@ -112,7 +112,14 @@
       font-size:12px; min-height:16px; margin-top:-10px; }
     @keyframes heroIn { from { opacity:0; transform:translateY(10px); filter:blur(6px); } to { opacity:1; transform:none; filter:none; } }
     @keyframes h-shimmer { 0% { background-position:150% 0; } 100% { background-position:-50% 0; } }
-    .hero .h-title   { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) both, h-shimmer 3.5s ease-in-out infinite; }
+    @keyframes h-glow {
+      0%,100% { filter:drop-shadow(0 0  0px transparent); }
+      50%     { filter:drop-shadow(0 0 12px color-mix(in srgb,var(--accent) 70%,white)); }
+    }
+    /* h-glow delayed 1.2s so it starts after heroIn (filter:blur) finishes — avoids filter conflict */
+    .hero .h-title   { animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) both, h-shimmer 2s linear infinite, h-glow 2s 1.2s ease-in-out infinite; }
+    /* Light mode: use --subtle peak (not #fff which would vanish on light bg); no glow */
+    html.light .hero .h-title { background:linear-gradient(90deg,var(--fg) 0%,var(--fg) 30%,var(--subtle) 50%,var(--fg) 70%,var(--fg) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent; animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) both, h-shimmer 2s linear infinite; }
     .hero .input-wrap{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .3s   both; }
     .hero .mode-inline{ animation:heroIn 1.2s cubic-bezier(.22,1,.36,1) .45s both; }
 
