@@ -65,14 +65,22 @@ export function extractVideoInfo(html: string) {
 }
 
 export async function fetchVideoInfo(videoId: string, signal?: AbortSignal) {
-  const html = await fetchWatchPage(videoId, signal)
-  const pr = extractPlayerResponse(html)
-  if (pr?.videoDetails?.videoId) return playerResponseToInfo(pr)
-  // watch page blocked or parse failed — try InnerTube Android endpoint
-  console.log(JSON.stringify({ phase: 'youtube.innertube.fallback', videoId }))
-  const pr2 = await fetchPlayerResponseViaInnertube(videoId, signal)
-  if (!pr2?.videoDetails?.videoId) throw new YoutubeError('VIDEO_NOT_FOUND')
-  return playerResponseToInfo(pr2)
+  // Track 1: watch page
+  try {
+    const html = await fetchWatchPage(videoId, signal)
+    const info = extractVideoInfo(html)
+    if (info) return info
+    // 200 but no playerResponse (consent gate, etc.) — fall through to InnerTube
+  } catch (err) {
+    if (err instanceof YoutubeError && err.code === 'VIDEO_NOT_FOUND') throw err
+    // YOUTUBE_BLOCKED (429/403/5xx) — fall through to InnerTube
+  }
+
+  // Track 2: InnerTube Android endpoint (not IP-blocked on CF edges)
+  console.log(JSON.stringify({ phase: 'innertube.used', videoId }))
+  const pr = await fetchPlayerResponseViaInnertube(videoId, signal)
+  if (!pr?.videoDetails?.videoId) throw new YoutubeError('VIDEO_NOT_FOUND')
+  return playerResponseToInfo(pr)
 }
 
 const TEXT_RE = /<text[^>]*>([\s\S]*?)<\/text>/g
