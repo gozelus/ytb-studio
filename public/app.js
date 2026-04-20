@@ -4,7 +4,6 @@ const state = {
   reqId: null,
   aborter: null,
   revealTimer: null,   // setTimeout handle for the reveal→article transition
-  stage: 'idle',
   tracks: null,
   meta: null,
   articleEnded: false,
@@ -368,7 +367,7 @@ function ensureInlineActions(container, buttons) {
 function showInlineError(err) {
   setStatus('⚠ 已中断', true)
   const stepN = err.step ?? parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10)
-  errorStep(stepN, err.code)
+  errorStep(stepN, errorMsg(err.code))
   const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
   const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
   if (!host) return
@@ -404,13 +403,15 @@ function estimateProgress() {
 
 // ---------- Error action handlers ----------
 function backToHero() {
-  if (state.aborter) { state.cancelled = true; state.aborter.abort() }
+  if (state.aborter) state.aborter.abort()
   $('rail').classList.remove('in')
   $('topbar').classList.remove('in')
   hideAllViews()
   $('hero').classList.remove('out')
   $('url').disabled = false; $('go').disabled = false
   resetRun()
+  // Set cancelled AFTER resetRun so late-arriving AbortError in consumeSse is still silenced
+  state.cancelled = true
 }
 
 function retry() {
