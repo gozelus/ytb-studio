@@ -45,6 +45,10 @@
     .rail.collapsed { width:40px; padding:54px 6px 20px; }
     .rail.collapsed > :not(.rail-toggle) { opacity:0; pointer-events:none; }
     .rail.dimmed { opacity:.38; pointer-events:none; filter:saturate(.4); }
+    .new-run { margin-top:16px; width:100%; padding:7px 0; border-radius:5px;
+      background:var(--accent); color:var(--bg); border:none; cursor:pointer;
+      font-size:12px; font-family:'JetBrains Mono', monospace; letter-spacing:.5px; }
+    .new-run[hidden] { display:none; }
     .rail-toggle { position:absolute; top:14px; left:14px;
       background:transparent; color:var(--subtle); border:none; cursor:pointer;
       font-size:16px; padding:4px; }
@@ -345,6 +349,7 @@
         <div class="opt" data-mode="faithful">忠实翻译</div>
       </div>
     </div>
+    <button class="new-run" id="newRunBtn" hidden>+ 新视频</button>
     <div style="margin-top:auto;">
       <div class="rail-label">生成信息</div>
       <div style="color:var(--subtle); font-size:12px; font-family:'JetBrains Mono', monospace;" id="railReq">—</div>
