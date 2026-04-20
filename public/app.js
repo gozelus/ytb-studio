@@ -234,13 +234,13 @@ async function consumeSse(body) {
   } catch (err) {
     if (state.cancelled) return
     if (!gotMeta) throw err
-    showInterrupt('GEMINI_STREAM_DROP')
+    showInterrupt('LLM_STREAM_DROP')
     return
   }
 
   if (state.cancelled) return
-  if (!gotMeta) throw { code: 'GEMINI_STREAM_DROP' }
-  if (!state.articleEnded) showInterrupt('GEMINI_STREAM_DROP')
+  if (!gotMeta) throw { code: 'LLM_STREAM_DROP' }
+  if (!state.articleEnded) showInterrupt('LLM_STREAM_DROP')
 }
 
 // ---------- Article ----------
@@ -335,12 +335,12 @@ const ERROR_COPY = {
   NO_CAPTIONS: '这个视频没有可用字幕',
   YOUTUBE_BLOCKED: '当前环境无法连接 YouTube（数据中心 IP 常见），请本地运行 npm run dev 或配置代理',
   PROXY_REQUIRED: '当前部署无法连接 YouTube（需配置代理）。请设置 PROXY_URL，或改用 LLM_PROVIDER=google 启用 Gemini 直读',
-  GEMINI_AUTH: 'Gemini 配置异常（API key 无效或过期）',
-  GEMINI_RATE_LIMIT: 'Gemini 速率限制，请稍后再试',
-  GEMINI_QUOTA: 'Gemini 免费额度已用尽',
-  GEMINI_SAFETY: '内容触发了 Gemini 的安全拦截',
-  GEMINI_TIMEOUT: 'Gemini 超时',
-  GEMINI_STREAM_DROP: 'Gemini 连接断开',
+  LLM_AUTH: 'LLM 配置异常（API key 无效或过期）',
+  LLM_RATE_LIMIT: 'LLM 速率限制，请稍后再试',
+  LLM_QUOTA: 'LLM 免费额度已用尽',
+  LLM_SAFETY: '内容触发了 LLM 安全拦截',
+  LLM_TIMEOUT: 'LLM 超时',
+  LLM_STREAM_DROP: 'LLM 连接断开',
   INTERNAL: '内部错误',
 }
 function errorMsg(code) { return ERROR_COPY[code] ?? `错误（${code ?? '未知'}）` }
