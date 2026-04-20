@@ -2,7 +2,6 @@
   "name": "ytb-studio",
   "version": "1.0.0",
   "description": "Turn a YouTube talk into a readable Chinese article.",
-  "main": "index.js",
   "directories": {
     "doc": "docs"
   },
@@ -17,9 +16,9 @@
     "type": "git",
     "url": "git+https://github.com/gozelus/ytb-studio.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["cloudflare-workers", "gemini", "youtube", "transcript", "chinese"],
+  "author": "Mike Zheng",
+  "license": "MIT",
   "type": "module",
   "bugs": {
     "url": "https://github.com/gozelus/ytb-studio/issues"
