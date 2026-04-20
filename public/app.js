@@ -167,6 +167,10 @@ function showPicker(data) {
 }
 
 async function pickTrack(trackId) {
+  if (trackId === 'gemini.direct') {
+    const r = document.querySelector('.step-row[data-step="3"] .step-t')
+    if (r) r.textContent = '准备 Gemini 输入'
+  }
   setStatus('下载字幕')
   activateStep(3)
   showView('prepView')
@@ -306,6 +310,7 @@ function renderEvent(ev) {
     clearStallIndicator()
     setStatus('完成')
     state.articleEnded = true
+    finishRun()
     return
   } else if (ev.type === 'error') {
     showInterrupt(ev.code ?? 'INTERNAL', ev.message)
@@ -355,6 +360,7 @@ function updateStallIndicator(s) {
       if (state.aborter) state.aborter.abort()
       clearStallIndicator()
       setStatus('⚠ 已中断', true)
+      finishRun()
     })
     actions.append(keepBtn, abortBtn)
     el.append(row, actions)
@@ -478,6 +484,9 @@ function resetRun() {
   $('m1').textContent = ''; $('m2').textContent = ''
   $('m3').textContent = ''; $('m4').textContent = ''
   byAll('.step-row').forEach(r => { r.classList.remove('active', 'done', 'err'); r.classList.add('pending') })
+  const s3label = document.querySelector('.step-row[data-step="3"] .step-t')
+  if (s3label) s3label.textContent = '下载字幕'
+  $('newRunBtn').hidden = true
   // Reset reveal/article classes so replay works cleanly
   $('revealView').classList.remove('play')
   $('articleView').classList.remove('show')
@@ -536,6 +545,7 @@ function showInterrupt(code, message) {
   if (state.cancelled) return
   setStatus('⚠ 已中断', true)
   removeCaret()
+  finishRun()
   const body = $('articleBody')
   const estimatedPct = estimateProgress()
   ensureInlineActions(body, {
@@ -551,6 +561,19 @@ function estimateProgress() {
   const paras = $('articleBody').querySelectorAll('p,h2,h3').length
   return Math.min(85, 10 + paras * 3)
 }
+
+// ---------- Run completion ----------
+function finishRun() {
+  $('rail').classList.remove('dimmed')
+  $('url').disabled = false
+  $('go').disabled = false
+  $('newRunBtn').hidden = false
+}
+
+$('newRunBtn').addEventListener('click', () => {
+  $('url').value = ''
+  backToHero()
+})
 
 // ---------- Error action handlers ----------
 function backToHero() {
