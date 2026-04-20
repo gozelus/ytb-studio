@@ -205,8 +205,8 @@ async function generateViaFileData(
     let firstChunk = true
     let events = 0
     try {
-      // Placeholder meta so the UI renders immediately; Gemini's own meta event (with the real
-      // title inferred from the video) flows through and the frontend updates via enterArticle.
+      // Placeholder meta so the UI renders immediately. Gemini's meta event is passed through
+      // but the frontend currently drops duplicate meta events (title update is future work).
       await writeEvent({ type: 'meta', reqId, title: `YouTube · ${videoId}`, subtitle: '', durationSec: 0 })
       const parser = createNdjsonParser(e => {
         if (e.type === 'end') return   // we send our own end
