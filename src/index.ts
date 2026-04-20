@@ -187,7 +187,7 @@ async function generateViaFileData(
   const fileUri = `https://www.youtube.com/watch?v=${videoId}`
   const prompt = buildPromptForVideo(mode)
   const parts: Part[] = [
-    { fileData: { fileUri, mimeType: 'video/*' } },
+    { fileData: { fileUri } },  // omit mimeType: Gemini auto-detects YouTube URLs; 'video/*' causes 400
     { text: prompt },
   ]
 
