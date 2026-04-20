@@ -176,6 +176,27 @@ describe('streamChat — Gemini error codes', () => {
     const gen = streamChat(cfg, 'p')
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
   })
+
+  it('throws GEMINI_SAFETY when finishReason=SAFETY (silent data loss fix)', async () => {
+    const sse = 'data: {"candidates":[{"finishReason":"SAFETY","content":{"parts":[]}}]}\n\n'
+    mockFetch(() => new Response(sse, { status: 200 }))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_SAFETY' })
+  })
+
+  it('throws GEMINI_TIMEOUT when finishReason=MAX_TOKENS (output truncation)', async () => {
+    const sse = 'data: {"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"...end"}]}}]}\n\n'
+    mockFetch(() => new Response(sse, { status: 200 }))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_TIMEOUT' })
+  })
+
+  it('throws GEMINI_SAFETY when promptFeedback.blockReason set (prompt fully blocked)', async () => {
+    const sse = 'data: {"promptFeedback":{"blockReason":"SAFETY"},"candidates":[]}\n\n'
+    mockFetch(() => new Response(sse, { status: 200 }))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_SAFETY' })
+  })
 })
 
 // ── streamChat: SSE streaming ─────────────────────────────────────────────────
@@ -386,6 +407,80 @@ describe('streamChat — model fallback', () => {
     const gen = streamChat(cfg, 'p')
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
     expect(attempt).toBe(3) // one fetch per model, each fails immediately
+  })
+
+  it('falls back to second model when first throws GEMINI_TIMEOUT (reqId c01ea9 repro)', async () => {
+    const models: string[] = []
+    // Use SSE-body error (HTTP 200) to avoid retryingFetch's 5xx retry delays
+    mockFetch(req => {
+      const model = new URL(req.url).pathname.split('/models/')[1]?.split(':')[0] ?? ''
+      models.push(model)
+      if (model === 'gemini-2.5-flash')
+        return new Response(
+          'data: {"error":{"code":500,"message":"internal server error"}}\n\n',
+          { status: 200 },
+        )
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+        { status: 200 },
+      )
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, 'p')) chunks.push(c)
+    expect(chunks.join('')).toBe('ok')
+    expect(models[0]).toBe('gemini-2.5-flash')
+    expect(models[1]).toBe('gemini-2.5-flash-lite')
+  })
+
+  it('falls back when first model throws GEMINI_STREAM_DROP before first token', async () => {
+    const models: string[] = []
+    mockFetch(req => {
+      const model = new URL(req.url).pathname.split('/models/')[1]?.split(':')[0] ?? ''
+      models.push(model)
+      if (model === 'gemini-2.5-flash') {
+        // HTTP 200 but no body → reader.read() returns done immediately → GEMINI_STREAM_DROP
+        return new Response(null, { status: 200 })
+      }
+      return new Response(
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+        { status: 200 },
+      )
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, 'p')) chunks.push(c)
+    expect(chunks.join('')).toBe('ok')
+    expect(models[1]).toBe('gemini-2.5-flash-lite')
+  })
+
+  it('falls back when first model throws GEMINI_STALL before first token', async () => {
+    const enc = new TextEncoder()
+    let callCount = 0
+    mockFetch(req => {
+      const model = new URL(req.url).pathname.split('/models/')[1]?.split(':')[0] ?? ''
+      callCount++
+      if (model === 'gemini-2.5-flash') {
+        // Silent stream — heartbeat fires then zombie watchdog throws GEMINI_STALL
+        const body = new ReadableStream<Uint8Array>({ start() {} })
+        return new Response(body, { status: 200 })
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          ctrl.enqueue(enc.encode('data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n'))
+          ctrl.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    })
+    const cfg: LlmConfig = { models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'], apiKey: 'fake' }
+    const chunks: string[] = []
+    for await (const c of streamChat(cfg, 'p', undefined, {
+      _idleTimeoutMs: 60,
+      _heartbeatIntervalMs: 20,
+    })) chunks.push(c)
+    expect(chunks.join('')).toBe('ok')
+    expect(callCount).toBeGreaterThanOrEqual(2)
   })
 
   it('does NOT fall back mid-stream after first token received', async () => {

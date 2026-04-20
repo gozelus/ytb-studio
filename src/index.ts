@@ -153,6 +153,7 @@ async function generate(request: Request, env: Env): Promise<Response> {
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
+      try { parser.end() } catch { /* flush any partial last line from buf */ }
       const code: ErrorCode = err instanceof LlmError ? err.code : 'GEMINI_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
@@ -219,6 +220,7 @@ async function generateViaGeminiDirect(
       await writeEvent({ type: 'end' })
       log({ reqId, phase: 'done', durMs: Date.now() - started, events })
     } catch (err) {
+      try { parser.end() } catch { /* flush any partial last line from buf */ }
       const code: ErrorCode = err instanceof LlmError ? err.code : 'GEMINI_STREAM_DROP'
       logError({ reqId, phase: 'generate.error', code, durMs: Date.now() - started, err: String(err) })
       await writeEvent({ type: 'error', code, message: String(err).slice(0, 200) })
