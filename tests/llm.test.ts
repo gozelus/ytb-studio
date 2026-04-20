@@ -155,6 +155,21 @@ describe('streamChat — Gemini error codes', () => {
     const gen = streamChat(cfg, 'p')
     await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_TIMEOUT' })
   })
+
+  it('throws GEMINI_OVERLOADED when SSE stream body contains 503 UNAVAILABLE error (reqId a3708c repro)', async () => {
+    // HTTP 200 but stream body carries an error event — retryingFetch 503 branch never fires
+    const sse = 'data: {"error":{"code":503,"status":"UNAVAILABLE","message":"The model is overloaded. Please try again later."}}\n\n'
+    mockFetch(() => new Response(sse, { status: 200 }))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
+  })
+
+  it('throws GEMINI_OVERLOADED when SSE stream body contains "high demand" message', async () => {
+    const sse = 'data: {"error":{"code":503,"status":"UNAVAILABLE","message":"This model is currently experiencing high demand."}}\n\n'
+    mockFetch(() => new Response(sse, { status: 200 }))
+    const gen = streamChat(cfg, 'p')
+    await expect(gen.next()).rejects.toMatchObject({ code: 'GEMINI_OVERLOADED' })
+  })
 })
 
 // ── streamChat: SSE streaming ─────────────────────────────────────────────────

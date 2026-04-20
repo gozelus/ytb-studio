@@ -258,11 +258,31 @@ function extractGoogleText(frame: string): string {
     const payload = line.slice(5).trim()
     if (!payload || payload === '[DONE]') continue
     try {
-      const obj = JSON.parse(payload) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
+      const obj = JSON.parse(payload) as {
+        error?: { code?: number; status?: string; message?: string }
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+      }
+      if (obj.error) {
+        const { code, status = '', message = '' } = obj.error
+        if (code === 503 || /UNAVAILABLE|high demand/i.test(status) || /UNAVAILABLE|high demand/i.test(message))
+          throw new LlmError('GEMINI_OVERLOADED', message.slice(0, 200))
+        if (code === 401 || code === 403 || /API_KEY_INVALID|API key not valid/i.test(message))
+          throw new LlmError('GEMINI_AUTH', message.slice(0, 200))
+        if (code === 429)
+          throw new LlmError(/RESOURCE_EXHAUSTED/i.test(status) ? 'GEMINI_QUOTA' : 'GEMINI_RATE_LIMIT', message.slice(0, 200))
+        if (/SAFETY|blocked|blockReason/i.test(message))
+          throw new LlmError('GEMINI_SAFETY', message.slice(0, 200))
+        if (/INVALID_ARGUMENT.*fileData|fileData.*video|cannot be processed/i.test(message))
+          throw new LlmError('GEMINI_VIDEO_UNSUPPORTED', message.slice(0, 200))
+        throw new LlmError('GEMINI_TIMEOUT', `stream error ${code}: ${message.slice(0, 200)}`)
+      }
       for (const c of obj.candidates ?? [])
         for (const p of c.content?.parts ?? [])
           if (p.text) out.push(p.text)
-    } catch { /* skip malformed frame */ }
+    } catch (e) {
+      if (e instanceof LlmError) throw e
+      /* skip truly malformed frames */
+    }
   }
   return out.join('')
 }
