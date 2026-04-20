@@ -21,7 +21,9 @@ interface Env {
   GEMINI_MODEL?: string
 }
 
-const DEFAULT_MODELS = 'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro'
+// 2026-04 Gemini 最新：3.1 preview 已上线，3.0 已于 2026-03-09 下线。
+// 主力 flash-preview（快），回退 pro-preview（强）。当前 3.1 没有 flash-lite 变体。
+const DEFAULT_MODELS = 'gemini-3.1-flash-preview,gemini-3.1-pro-preview'
 
 export function loadLlmConfig(env: Env): LlmConfig {
   if (!env.GEMINI_API_KEY) {

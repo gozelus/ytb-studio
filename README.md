@@ -67,16 +67,18 @@ wrangler secret put SHARECODE
 
 ### Model Fallback
 
-默认自动按优先级级联 fallback：`gemini-2.5-flash → gemini-2.5-flash-lite → gemini-2.5-pro`
+默认自动按优先级级联 fallback：`gemini-3.1-flash-preview → gemini-3.1-pro-preview`
 
 ```toml
 [vars]
-GEMINI_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro"
+GEMINI_MODELS = "gemini-3.1-flash-preview,gemini-3.1-pro-preview"
 ```
 
-当前 model 503 / 过载 / quota 时自动切换下一个，用户无感。顺序是"快 → 便宜 → 高能"，大多数用户不需要改。
+当前 model 503 / 过载 / quota 时自动切换下一个，用户无感。顺序是"快 → 强"，大多数用户不需要改。
 
-单模型兼容：旧的 `GEMINI_MODEL = "gemini-2.5-flash"` 仍然有效（只用该单一模型）。
+> 3.1 目前是 preview：能力最强但 schema 可能随时调整。如要求绝对稳定，把 `GEMINI_MODELS` 覆写为 `gemini-2.5-flash,gemini-2.5-pro` 即可。3.0 已于 2026-03-09 下线，别再用。
+
+单模型兼容：旧的 `GEMINI_MODEL = "gemini-3.1-flash-preview"` 仍然有效（只用该单一模型）。
 
 > **需要付费 Gemini tier**：免费档限 20 req/day，不够正常使用。
 > 在 Google AI Studio 开启 billing 后同一个 key 即解除限制。

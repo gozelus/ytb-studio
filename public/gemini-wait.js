@@ -19,10 +19,32 @@ export function createGeminiWaitUi({ $ }) {
   let generateStartMs = 0
   let tipWarmLocked = false
 
-  function setTipText(text) {
-    const el = $('geminiTip')
-    el.style.opacity = '0'
-    setTimeout(() => { el.textContent = text; el.style.opacity = '' }, 400)
+  function renderTipLine(text) {
+    // Strip trailing ellipsis (original tips end with "…") — we render animated dots via .tip-dots
+    const stripped = text.replace(/[.…]+$/, '').trim()
+    const line = document.createElement('span')
+    line.className = 'tip-line'
+    line.appendChild(document.createTextNode(stripped))
+    const dots = document.createElement('span')
+    dots.className = 'tip-dots'
+    dots.innerHTML = '<i>.</i><i>.</i><i>.</i>'
+    line.appendChild(dots)
+    return line
+  }
+
+  function setTipText(text, { immediate = false } = {}) {
+    const host = $('geminiTip')
+    const next = renderTipLine(text)
+    if (immediate) {
+      host.innerHTML = ''
+    } else {
+      // Cross-fade: mark existing lines .exit, remove on animationend
+      host.querySelectorAll('.tip-line:not(.exit)').forEach(el => {
+        el.classList.add('exit')
+        el.addEventListener('animationend', () => el.remove(), { once: true })
+      })
+    }
+    host.appendChild(next)
   }
 
   function startGeminiWait() {
@@ -34,7 +56,7 @@ export function createGeminiWaitUi({ $ }) {
     clearFallbackLog()
     tip.hidden = false
     tip.className = 'gemini-tip'
-    tip.textContent = GEMINI_TIPS[0]
+    setTipText(GEMINI_TIPS[0], { immediate: true })
     timer.hidden = false
     timer.textContent = '已等待 0s · 预估 1–3 分钟'
     tipTimerHandle = setInterval(() => {
@@ -64,7 +86,7 @@ export function createGeminiWaitUi({ $ }) {
     if (el.hidden) return
     tipWarmLocked = true
     el.className = 'gemini-tip warm'
-    setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟…')
+    setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟')
   }
 
   function updatePrepHeartbeat(s, stage = '', ev = {}) {
