@@ -174,11 +174,6 @@
     .prep-title { font-size:20px; font-weight:600; letter-spacing:1.5px; text-align:center; }
     .prep-meta { font-family:'JetBrains Mono', monospace; color:var(--subtle);
       font-size:12px; text-align:center; margin-top:4px; }
-    .step-list { width:380px; max-width:85vw; margin-top:6px; }
-    .prep-fallback-banner { width:380px; max-width:85vw; font-size:12px;
-      color:var(--warn); font-family:'JetBrains Mono', monospace;
-      margin-top:8px; letter-spacing:.2px; }
-    .prep-fallback-banner[hidden] { display:none; }
     .gemini-tip { width:380px; max-width:85vw; font-size:12px; color:var(--subtle);
       font-family:'JetBrains Mono', monospace; letter-spacing:.3px;
       margin-top:4px; opacity:1; transition:opacity .4s; }
@@ -187,24 +182,6 @@
     .gemini-timer { width:380px; max-width:85vw; font-size:11px; color:var(--subtle);
       font-family:'JetBrains Mono', monospace; opacity:.55; margin-top:4px; }
     .gemini-timer[hidden] { display:none; }
-    .step-row { display:flex; align-items:center; gap:14px; padding:7px 2px;
-      font-size:13px; transition:opacity .4s; }
-    .step-row.pending { opacity:.3; }
-    .step-row.done { opacity:.65; }
-    .step-row.active { opacity:1; }
-    .step-row.err { opacity:1; color:var(--warn); }
-    .dot { width:8px; height:8px; border-radius:50%; background:var(--border);
-      flex-shrink:0; transition:background .3s; }
-    .step-row.done .dot { background:var(--accent); }
-    .step-row.active .dot { background:var(--fg); animation:dotBreath 1.3s ease-in-out infinite; }
-    .step-row.err .dot { background:var(--warn); box-shadow:0 0 0 4px color-mix(in srgb, var(--warn) 20%, transparent); }
-    @keyframes dotBreath {
-      0%,100% { box-shadow:0 0 0 2px color-mix(in srgb, var(--fg) 12%, transparent); }
-      50%     { box-shadow:0 0 0 6px color-mix(in srgb, var(--fg) 4%, transparent); }
-    }
-    .step-t { min-width:100px; }
-    .step-meta { font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--subtle); }
-
     /* Picker */
     .picker { width:420px; max-width:88%; display:flex; flex-direction:column; gap:10px; align-items:center; }
     .cap { width:100%; border:1px solid var(--border); border-radius:6px;
@@ -390,13 +367,6 @@
           <div class="prep-title" id="prepTitle">正在准备</div>
           <div class="prep-meta" id="prepMeta"></div>
         </div>
-        <div class="step-list">
-          <div class="step-row pending" data-step="1"><span class="dot"></span><span class="step-t">连接视频</span><span class="step-meta" id="m1"></span></div>
-          <div class="step-row pending" data-step="2"><span class="dot"></span><span class="step-t">解析字幕轨</span><span class="step-meta" id="m2"></span></div>
-          <div class="step-row pending" data-step="3"><span class="dot"></span><span class="step-t">下载字幕</span><span class="step-meta" id="m3"></span></div>
-          <div class="step-row pending" data-step="4"><span class="dot"></span><span class="step-t">唤醒 Gemini</span><span class="step-meta" id="m4"></span></div>
-        </div>
-        <div id="prepFallbackBanner" class="prep-fallback-banner" hidden>⚠ 将使用 Gemini 直读：由 Google 自己访问视频，不经我们的服务器</div>
         <div id="geminiTip" class="gemini-tip" hidden></div>
         <div id="geminiTimer" class="gemini-timer" hidden></div>
       </div>

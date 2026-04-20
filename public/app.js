@@ -112,7 +112,6 @@ async function start() {
 async function runInspect(url) {
   showView('prepView')
   setStatus('连接视频')
-  activateStep(1)
   const res = await fetch('/api/inspect', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -122,14 +121,7 @@ async function runInspect(url) {
   state.reqId = data.reqId ?? null
   state.geminiFallbackReason = data.gemini_fallback_reason ?? null
   renderRailReq()
-  if (!res.ok) throw { code: data.error ?? 'INTERNAL', step: parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10) }
-
-  $('m1').textContent = data.channel ? `${fmtDur(data.durationSec)} · ${data.channel}` : '—'
-  doneStep(1); activateStep(2)
-  setStatus('解析字幕')
-  $('m2').textContent = state.geminiFallbackReason ? 'AI 直读' : `发现 ${data.tracks.length} 条`
-  if (state.geminiFallbackReason) $('prepFallbackBanner').hidden = false
-  doneStep(2)
+  if (!res.ok) throw { code: data.error ?? 'INTERNAL' }
 
   showPicker(data)
 }
@@ -169,12 +161,7 @@ function showPicker(data) {
 }
 
 async function pickTrack(trackId) {
-  if (trackId === 'gemini.direct') {
-    const r = document.querySelector('.step-row[data-step="3"] .step-t')
-    if (r) r.textContent = '准备 Gemini 输入'
-  }
-  setStatus(trackId === 'gemini.direct' ? '准备 Gemini 输入' : '下载字幕')
-  activateStep(3)
+  setStatus('生成中')
   showView('prepView')
   try {
     await runGenerate(trackId)
@@ -200,11 +187,9 @@ async function runGenerate(trackId) {
   }
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({ error: 'INTERNAL' }))
-    throw { code: data.error, step: 3 }
+    throw { code: data.error ?? 'INTERNAL' }
   }
-  doneStep(3); activateStep(4)
   setStatus('唤醒 Gemini')
-  $('m3').textContent = `track ${trackId}`
   startGeminiWait()
 
   await consumeSse(res.body)
@@ -232,7 +217,7 @@ async function consumeSse(body) {
         if (!gotMeta && ev.type === 'meta') {
           gotMeta = true
           stopGeminiWait()
-          doneStep(4); setStatus('生成中')
+          setStatus('生成中')
           enterArticle(ev)
         } else if (!gotMeta && ev.type === 'error') {
           // Error arrived before first meta — still in prep stage; show inline error
@@ -451,26 +436,10 @@ function setTipToWarm() {
   setTipText('Gemini 仍在深度思考，长视频通常需要 1–3 分钟…')
 }
 
-// ---------- Step controls ----------
-function activateStep(n) {
-  byAll('.step-row').forEach(r => {
-    const s = +r.dataset.step
-    r.classList.remove('pending', 'active', 'done', 'err')
-    if (s < n) r.classList.add('done')
-    else if (s === n) r.classList.add('active')
-    else r.classList.add('pending')
-  })
-}
-function doneStep(n) {
-  const r = document.querySelector(`.step-row[data-step="${n}"]`)
-  if (r) { r.classList.remove('active', 'pending'); r.classList.add('done') }
-}
-function errorStep(n, text) {
-  const r = document.querySelector(`.step-row[data-step="${n}"]`)
-  if (r) { r.classList.remove('active', 'pending'); r.classList.add('err') }
-  const metaEl = document.getElementById('m' + n)
-  if (metaEl && text) metaEl.textContent = text
-}
+// ---------- Step controls (no-op: step list removed) ----------
+function activateStep() {}
+function doneStep() {}
+function errorStep() {}
 
 // ---------- Error copy ----------
 const ERROR_COPY = {
@@ -498,7 +467,6 @@ function resetRun() {
   state.geminiFallbackReason = null
   renderRailReq()
   $('geminiWarning').textContent = ''
-  $('prepFallbackBanner').hidden = true
   state.articleEnded = false
   state.revealDone = false
   state.renderQueue = []
@@ -508,11 +476,6 @@ function resetRun() {
   $('articleBody').innerHTML = ''
   clearStallIndicator()
   stopGeminiWait()
-  $('m1').textContent = ''; $('m2').textContent = ''
-  $('m3').textContent = ''; $('m4').textContent = ''
-  byAll('.step-row').forEach(r => { r.classList.remove('active', 'done', 'err'); r.classList.add('pending') })
-  const s3label = document.querySelector('.step-row[data-step="3"] .step-t')
-  if (s3label) s3label.textContent = '下载字幕'
   $('newRunBtn').hidden = true
   // Reset reveal/article classes so replay works cleanly
   $('revealView').classList.remove('play')
@@ -555,8 +518,6 @@ function showInlineError(err) {
   stopGeminiWait()
   setStatus('⚠ 已中断', true)
   const msg = errorMsg(err.code)
-  const stepN = err.step ?? parseInt($$('.step-row.active')?.dataset?.step ?? '1', 10)
-  errorStep(stepN, msg)
   const anchor = $('prepView').classList.contains('out') ? $('pickView') : $('prepView')
   const host = anchor.querySelector('.prep-col') || anchor.querySelector('.picker')
   if (!host) return
@@ -628,7 +589,6 @@ function regenerate() {
   resetRun()
   $('articleView').classList.add('out')
   showView('prepView')
-  activateStep(1)
   $('rail').classList.add('dimmed')
   runInspect($('url').value).catch(showInlineError)
 }
